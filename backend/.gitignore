@@ -1,0 +1,88 @@
+# =============================================================
+#  VoiceScript Studio — Backend .gitignore
+#  Stack: Python 3.13 · Flask · Groq · yt-dlp · imageio-ffmpeg
+# =============================================================
+
+# ── Secrets & Environment ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Python Bytecode & Cache ───────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+
+# ── Virtual Environments ──────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# ── Distribution / Packaging ──────────────────────────────────
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+.eggs/
+wheels/
+
+# ── Testing & Coverage ────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.cover
+.tox/
+.nox/
+
+# ── Linting & Type Checking ───────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+logs/
+flask_session/
+
+# ── yt-dlp / ffmpeg Downloads & Temp Files ────────────────────
+*.mp3
+*.mp4
+*.webm
+*.m4a
+*.wav
+*.ogg
+*.flac
+*.opus
+*.part
+*.ytdl
+downloads/
+tmp/
+temp/
+
+# ── imageio-ffmpeg Cache ───────────────────────────────────────
+imageio_ffmpeg/
+
+# ── OS & Editor ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.sw?
+
+# ── Misc ──────────────────────────────────────────────────────
+*.bak
+*.tmp
+.hypothesis/

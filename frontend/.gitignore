@@ -1,0 +1,59 @@
+# =============================================================
+#  VoiceScript Studio — Frontend .gitignore
+#  Stack: React 18 · Vite · TailwindCSS · PostCSS · lucide-react
+# =============================================================
+
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+
+# ── Build Output ──────────────────────────────────────────────
+dist/
+dist-ssr/
+build/
+
+# ── Vite Cache & Local Config ─────────────────────────────────
+.vite/
+vite.config.*.local
+*.local
+
+# ── Environment & Secrets ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Logs ──────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Testing & Coverage ────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── TypeScript (future-proofing) ──────────────────────────────
+*.tsbuildinfo
+
+# ── TailwindCSS / PostCSS ─────────────────────────────────────
+# (config files are tracked; generated output is not)
+*.css.map
+
+# ── OS & Editor ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── Misc ──────────────────────────────────────────────────────
+*.bak
+*.tmp

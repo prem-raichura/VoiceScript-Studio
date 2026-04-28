@@ -1,0 +1,25 @@
+{
+  "name": "audio-transcriber",
+  "private": true,
+  "version": "1.0.5",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && npm version patch --no-git-tag-version",
+    "build:major": "vite build && npm version minor --no-git-tag-version",
+    "build:major-true": "vite build && npm version major --no-git-tag-version",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lucide-react": "^0.383.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.6",
+    "vite": "^8.0.8"
+  }
+}

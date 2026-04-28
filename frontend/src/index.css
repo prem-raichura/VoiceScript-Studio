@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  body { @apply bg-[#f4f6ff] text-gray-900 font-sans; min-height: 100vh; }
+}
+
+@layer components {
+  .glass {
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.9);
+  }
+  .glass-dark {
+    background: rgba(20,24,102,0.06);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(58,91,255,0.12);
+  }
+  .card {
+    @apply bg-white rounded-2xl shadow-card border border-white/80;
+  }
+  .card-lg {
+    @apply bg-white rounded-3xl shadow-card-lg border border-white/80;
+  }
+  .btn-brand {
+    @apply relative inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl
+           bg-brand-500 text-white font-semibold text-sm shadow-brand
+           transition-all duration-200 overflow-hidden
+           hover:bg-brand-600 hover:shadow-brand hover:-translate-y-0.5
+           active:scale-95 active:translate-y-0
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm
+           text-brand-600 border border-brand-100 bg-brand-50
+           transition-all duration-200
+           hover:bg-brand-100 hover:border-brand-200 hover:-translate-y-0.5
+           active:scale-95 active:translate-y-0
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm
+           text-red-600 border border-red-100 bg-red-50
+           transition-all duration-200 hover:bg-red-100 active:scale-95
+           disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300;
+  }
+  .input-select {
+    @apply block w-full rounded-xl border border-brand-100 bg-brand-50/50 px-3.5 py-2.5
+           text-sm text-gray-800 font-medium
+           focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent focus:bg-white
+           hover:border-brand-200 transition-all duration-150 appearance-none cursor-pointer;
+  }
+  .shimmer-bg {
+    background: linear-gradient(90deg, #f0f3ff 25%, #e4eaff 50%, #f0f3ff 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.8s linear infinite;
+  }
+  .wave-bar {
+    @apply w-0.5 rounded-full bg-brand-400 origin-bottom;
+  }
+  .tag {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold;
+  }
+}
+
+@layer utilities {
+  .wave-1 { animation: waveBar 1.2s ease-in-out 0.0s infinite; }
+  .wave-2 { animation: waveBar 1.2s ease-in-out 0.1s infinite; }
+  .wave-3 { animation: waveBar 1.2s ease-in-out 0.2s infinite; }
+  .wave-4 { animation: waveBar 1.2s ease-in-out 0.3s infinite; }
+  .wave-5 { animation: waveBar 1.2s ease-in-out 0.4s infinite; }
+  .wave-6 { animation: waveBar 1.2s ease-in-out 0.5s infinite; }
+  .dot-1 { animation: bounceDot 1.4s ease-in-out 0.0s infinite; }
+  .dot-2 { animation: bounceDot 1.4s ease-in-out 0.2s infinite; }
+  .dot-3 { animation: bounceDot 1.4s ease-in-out 0.4s infinite; }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #c7d2fe transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #c7d2fe; border-radius: 99px; }
+  .text-balance { text-wrap: balance; }
+}
