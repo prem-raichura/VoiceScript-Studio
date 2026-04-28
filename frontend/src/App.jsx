@@ -233,9 +233,9 @@ function buildExportHtmlReport({
   </p>
   ${sections}
   ${mode === 'pdf'
-    ? '<div class="pdf-footer">Developed by <a href="https://premraichura.me" target="_blank" rel="noopener noreferrer">Prem Raichura</a> | premraichura.me</div>'
-    : '<footer class="doc-footer">Developed by <a href="https://premraichura.me" target="_blank" rel="noopener noreferrer">Prem Raichura</a> | <a href="https://premraichura.me" target="_blank" rel="noopener noreferrer">premraichura.me</a></footer>'
-  }
+      ? '<div class="pdf-footer">Developed by <a href="https://premraichura.me" target="_blank" rel="noopener noreferrer">Prem Raichura</a> | premraichura.me</div>'
+      : '<footer class="doc-footer">Developed by <a href="https://premraichura.me" target="_blank" rel="noopener noreferrer">Prem Raichura</a> | <a href="https://premraichura.me" target="_blank" rel="noopener noreferrer">premraichura.me</a></footer>'
+    }
 </body>
 </html>`
 }
