@@ -10,7 +10,7 @@ import mimetypes
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from uuid import uuid4
 from flask import Flask, request, Response, stream_with_context, jsonify, send_file
 from flask_cors import CORS
@@ -161,6 +161,25 @@ def _detect_drive_media_kind(url):
     except Exception:
         pass
     return "drive_video", "Drive Video", "video"
+
+
+def _sanitize_youtube_url(url):
+    try:
+        parsed = urlparse(url)
+        host = (parsed.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        
+        if host in ("youtube.com", "youtu.be") or host.endswith(".youtube.com"):
+            if parsed.path == "/watch":
+                qs = parse_qs(parsed.query)
+                if "v" in qs:
+                    new_query = urlencode({"v": qs["v"][0]})
+                    parsed = parsed._replace(query=new_query)
+                    return urlunparse(parsed)
+    except Exception:
+        pass
+    return url
 
 
 def detect_source(url):
@@ -464,6 +483,8 @@ def detect_source_route():
     if not url:
         return jsonify({"error": "URL is required"}), 400
 
+    url = _sanitize_youtube_url(url)
+
     detected = detect_source(url)
     if detected.get("source_type") == "unsupported":
         return jsonify({"error": "Unsupported input source"}), 400
@@ -726,6 +747,9 @@ def extract_audio_url():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "URL is required"}), 400
+
+    url = _sanitize_youtube_url(url)
+
     detected = detect_source(url)
     if detected.get("source_type") == "unsupported":
         return jsonify({"error": "Unsupported URL. Use Google Drive, YouTube, or direct audio links."}), 400
