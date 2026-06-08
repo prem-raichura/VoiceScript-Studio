@@ -6,6 +6,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/detect-source': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
       '/transcribe': {
         target: 'http://localhost:5000',
         changeOrigin: true,
