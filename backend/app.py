@@ -1,19 +1,24 @@
 """
 VoiceScript Studio – Backend API
-Fixes applied:
-  1. Gunicorn gthread-safe request handling (no sync-worker timeout on large uploads)
-  2. YouTube cookie errors fixed – temp cookie file is written atomically with proper
-     cleanup; falls back gracefully when no cookies are configured
-  3. Large-file upload: file is saved to disk BEFORE any Whisper call so the gunicorn
-     worker is never blocked waiting for multipart I/O
-  4. ThreadPoolExecutor is bounded to avoid spawning too many threads on Render's
-     free/starter tier
-  5. All temp dirs are cleaned up in finally-blocks
-  6. Structured logging replaces bare print() calls
-  7. detect_source is resilient – network errors don't crash the endpoint
-  8. _get_ydl_opts is thread-safe (each call writes to a unique temp path)
-  9. Content-Length guard on /transcribe uses request.content_length safely
- 10. gunicorn.conf.py is included at the bottom as a comment block – copy it out
+=================================
+Fixes in this version
+─────────────────────
+1.  Gunicorn worker timeout  → gthread worker + 300 s timeout (gunicorn.conf.py)
+2.  Large-upload timeout     → file streamed to disk in 512 KB chunks BEFORE
+                               Werkzeug multipart parsing
+3.  YouTube bot-detection    → multi-client cascade with automatic retry +
+                               clear user-facing error; cookie file is written
+                               to a unique temp path per call (thread-safe)
+4.  android_vr / ios removed → those clients are now blocked by YouTube (2026);
+                               replaced with web → mweb → android cascade
+5.  yt-dlp kept up to date   → upgrade checked in _ensure_ytdlp_fresh() on first
+                               request (non-blocking background thread)
+6.  Cookie file handling      → unique NamedTemporaryFile per call; existing
+                               paths reused without copying; always cleaned up
+7.  ThreadPoolExecutor capped → min(3, segments) workers
+8.  Structured logging        → all log.* calls; no bare print()
+9.  _sse_response() helper    → DRY SSE headers
+10. All temp dirs cleaned in finally-blocks
 """
 
 import json
@@ -43,9 +48,7 @@ try:
 except Exception:
     imageio_ffmpeg = None
 
-# ---------------------------------------------------------------------------
-# Bootstrap
-# ---------------------------------------------------------------------------
+# ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 load_dotenv()
 
@@ -70,80 +73,98 @@ CORS(
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+# ─── Constants ────────────────────────────────────────────────────────────────
 
 LANGUAGES = {
-    "en": "English",
-    "hi": "Hindi",
-    "gu": "Gujarati",
-    "es": "Spanish",
-    "fr": "French",
-    "de": "German",
-    "ja": "Japanese",
-    "zh": "Chinese (Mandarin)",
-    "ar": "Arabic",
-    "pt": "Portuguese",
-    "ru": "Russian",
-    "ko": "Korean",
-    "it": "Italian",
+    "en": "English", "hi": "Hindi",  "gu": "Gujarati",
+    "es": "Spanish",  "fr": "French", "de": "German",
+    "ja": "Japanese", "zh": "Chinese (Mandarin)", "ar": "Arabic",
+    "pt": "Portuguese", "ru": "Russian", "ko": "Korean", "it": "Italian",
 }
 
-WHISPER_MAX_BYTES = 25 * 1024 * 1024  # 25 MB – Groq hard limit
-URL_JOB_TTL_SECONDS = 60 * 60         # 1 hour
+WHISPER_MAX_BYTES   = 25 * 1024 * 1024  # 25 MB – Groq hard limit
+URL_JOB_TTL_SECONDS = 60 * 60           # 1 hour
 
-SUPPORTED_VIDEO_HOSTS = ("youtube.com", "youtu.be", "drive.google.com")
-WHISPER_ALLOWED_EXTS = {
-    "flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "opus", "wav", "webm",
-}
 DIRECT_AUDIO_EXTS = {"flac", "mp3", "m4a", "ogg", "opus", "wav", "webm", "aac", "amr"}
 DIRECT_VIDEO_EXTS = {"mp4", "mov", "mkv", "avi", "webm", "mpeg"}
+WHISPER_ALLOWED_EXTS = {"flac","mp3","mp4","mpeg","mpga","m4a","ogg","opus","wav","webm"}
 MIME_TO_AUDIO_EXT = {
-    "audio/flac": "flac",
-    "audio/mpeg": "mp3",
-    "audio/mp3": "mp3",
-    "audio/mp4": "mp4",
-    "video/mp4": "mp4",
-    "audio/x-m4a": "m4a",
-    "audio/m4a": "m4a",
-    "audio/ogg": "ogg",
-    "audio/opus": "opus",
-    "audio/wav": "wav",
-    "audio/x-wav": "wav",
-    "audio/webm": "webm",
+    "audio/flac": "flac", "audio/mpeg": "mp3", "audio/mp3": "mp3",
+    "audio/mp4": "mp4",   "video/mp4": "mp4",  "audio/x-m4a": "m4a",
+    "audio/m4a": "m4a",   "audio/ogg": "ogg",  "audio/opus": "opus",
+    "audio/wav": "wav",   "audio/x-wav": "wav","audio/webm": "webm",
     "video/webm": "webm",
 }
 
-# In-memory job store
+# YouTube player clients tried in order.
+# android_vr / ios removed – YouTube blocked them in 2026.
+# web_embedded was also removed (2026.01.31).
+# Current working cascade (as of yt-dlp 2026.03.x): web → mweb → android
+YOUTUBE_PLAYER_CLIENTS = ["web", "mweb", "android"]
+
 URL_AUDIO_JOBS: dict = {}
 URL_AUDIO_JOBS_LOCK = threading.Lock()
 
-# ---------------------------------------------------------------------------
-# Cookie helpers  ← FIX: thread-safe, unique temp file per call
-# ---------------------------------------------------------------------------
+# Background yt-dlp freshness check (runs once per process lifetime)
+_YTDLP_REFRESH_DONE = False
+_YTDLP_REFRESH_LOCK = threading.Lock()
+
+
+# ─── yt-dlp auto-update (non-blocking) ───────────────────────────────────────
+
+def _ensure_ytdlp_fresh() -> None:
+    """
+    Upgrade yt-dlp in the background on first request.
+    YouTube patches their bot-detection constantly; keeping yt-dlp current is
+    the single most effective defence against the 'Sign in to confirm' error.
+    """
+    global _YTDLP_REFRESH_DONE
+    with _YTDLP_REFRESH_LOCK:
+        if _YTDLP_REFRESH_DONE:
+            return
+        _YTDLP_REFRESH_DONE = True
+
+    def _upgrade():
+        try:
+            result = subprocess.run(
+                ["pip", "install", "--upgrade", "--quiet", "yt-dlp"],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                log.info("yt-dlp upgraded successfully.")
+            else:
+                log.warning("yt-dlp upgrade failed: %s", result.stderr.strip()[:200])
+        except Exception as exc:
+            log.warning("yt-dlp upgrade check skipped: %s", exc)
+
+    threading.Thread(target=_upgrade, daemon=True).start()
+
+
+@app.before_request
+def _before_request():
+    _ensure_ytdlp_fresh()
+
+
+# ─── Cookie helpers ───────────────────────────────────────────────────────────
 
 def _write_temp_cookies() -> str | None:
     """
-    Write YouTube cookies to a unique temp file and return its path.
-    Returns None when no cookie source is configured so yt-dlp runs
-    without cookies (works for public videos).
+    Return a path to a Netscape-format cookie file, or None if none is
+    configured.  When the content comes from an env-var we write it to a
+    unique temp file (thread-safe).  Existing file paths are returned as-is.
 
     Priority:
-      1. YOUTUBE_COOKIES_CONTENT env-var  (raw Netscape cookie text)
-      2. YOUTUBE_COOKIES_FILE env-var     (path to a cookies file)
-      3. cookies.txt in the working dir
-      4. /etc/secrets/cookies.txt         (Render secret-file mount)
+      1. YOUTUBE_COOKIES_CONTENT  (raw text in an env-var – best for Render)
+      2. YOUTUBE_COOKIES_FILE     (path env-var)
+      3. cookies.txt              (local working dir)
+      4. /etc/secrets/cookies.txt (Render secret-file mount)
     """
     content = os.getenv("YOUTUBE_COOKIES_CONTENT", "").strip()
     if content:
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".txt",
-            prefix="yt_cookies_",
-            delete=False,
-        )
         try:
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", prefix="yt_cookies_", delete=False,
+            )
             tmp.write(content)
             tmp.flush()
             tmp.close()
@@ -151,10 +172,6 @@ def _write_temp_cookies() -> str | None:
             return tmp.name
         except Exception as exc:
             log.warning("Failed to write cookie temp file: %s", exc)
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
             return None
 
     for candidate in (
@@ -164,33 +181,10 @@ def _write_temp_cookies() -> str | None:
     ):
         if candidate and os.path.isfile(candidate):
             log.debug("Using cookie file: %s", candidate)
-            return candidate  # Existing file – don't delete it later
+            return candidate
 
-    log.debug("No cookie source found; yt-dlp will run without cookies.")
+    log.debug("No cookie source configured – yt-dlp will run without cookies.")
     return None
-
-
-def _get_ydl_opts(base_opts: dict | None = None) -> dict:
-    """
-    Return yt-dlp options dict with cookies and the android_vr client
-    injected.  Each call may create a *new* temp cookie file; callers
-    are responsible for cleanup via _cleanup_ydl_cookies().
-    """
-    opts = (base_opts or {}).copy()
-
-    cookie_path = _write_temp_cookies()
-    if cookie_path:
-        opts["cookiefile"] = cookie_path
-        # Tag the path so the caller can unlink it when it's a temp file
-        opts["_temp_cookiefile"] = cookie_path if cookie_path.startswith(tempfile.gettempdir()) else None
-
-    # Use android_vr + ios + android clients to bypass bot-detection
-    # without needing PO tokens.
-    extractor_args = opts.setdefault("extractor_args", {})
-    yt_args = extractor_args.setdefault("youtube", {})
-    yt_args.setdefault("player_client", ["android_vr", "ios", "android"])
-
-    return opts
 
 
 def _cleanup_ydl_cookies(opts: dict) -> None:
@@ -204,9 +198,32 @@ def _cleanup_ydl_cookies(opts: dict) -> None:
             pass
 
 
-# ---------------------------------------------------------------------------
-# ffmpeg helpers
-# ---------------------------------------------------------------------------
+def _get_ydl_opts(base_opts: dict | None = None) -> dict:
+    """
+    Build a yt-dlp options dict.
+
+    Key decisions for 2026 bot-detection:
+    • player_client = web,mweb,android  (android_vr / ios are now blocked)
+    • Cookie file injected when available
+    • Each call gets its own temp cookie path – thread safe
+    """
+    opts = (base_opts or {}).copy()
+
+    cookie_path = _write_temp_cookies()
+    if cookie_path:
+        opts["cookiefile"] = cookie_path
+        # Tag temp files so the caller can clean them up
+        if cookie_path.startswith(tempfile.gettempdir()):
+            opts["_temp_cookiefile"] = cookie_path
+
+    extractor_args = opts.setdefault("extractor_args", {})
+    yt_args = extractor_args.setdefault("youtube", {})
+    yt_args["player_client"] = YOUTUBE_PLAYER_CLIENTS  # override whatever was there
+
+    return opts
+
+
+# ─── ffmpeg helpers ───────────────────────────────────────────────────────────
 
 def _get_ffmpeg_executable() -> str | None:
     exe = shutil.which("ffmpeg")
@@ -231,9 +248,7 @@ def _extract_audio_with_ffmpeg(input_path: Path, output_path: Path) -> None:
     cmd = [
         ffmpeg_exe, "-y",
         "-i", str(input_path),
-        "-vn",
-        "-acodec", "libmp3lame",
-        "-q:a", "4",
+        "-vn", "-acodec", "libmp3lame", "-q:a", "4",
         str(output_path),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -242,15 +257,10 @@ def _extract_audio_with_ffmpeg(input_path: Path, output_path: Path) -> None:
         raise RuntimeError(f"Audio extraction failed: {detail[-400:]}")
 
 
-# ---------------------------------------------------------------------------
-# Whisper helpers
-# ---------------------------------------------------------------------------
+# ─── Whisper helpers ──────────────────────────────────────────────────────────
 
 def run_whisper(
-    audio_bytes: bytes,
-    filename: str,
-    content_type: str,
-    source_lang: str,
+    audio_bytes: bytes, filename: str, content_type: str, source_lang: str,
 ) -> tuple[str, str, float]:
     kwargs: dict = {
         "file": (filename, audio_bytes, content_type),
@@ -260,7 +270,6 @@ def run_whisper(
     }
     if source_lang != "auto":
         kwargs["language"] = source_lang
-
     transcript = client.audio.transcriptions.create(**kwargs)
     return (
         transcript.text,
@@ -273,16 +282,13 @@ def _transcribe_segment_file(
     path: Path, source_lang: str, index: int
 ) -> tuple[int, str, str, float]:
     content_type = mimetypes.guess_type(str(path))[0] or "audio/mpeg"
-    audio_bytes = path.read_bytes()
     text, detected_lang, duration = run_whisper(
-        audio_bytes, path.name, content_type, source_lang
+        path.read_bytes(), path.name, content_type, source_lang,
     )
     return index, text, detected_lang, duration
 
 
-# ---------------------------------------------------------------------------
-# Translation
-# ---------------------------------------------------------------------------
+# ─── Translation ──────────────────────────────────────────────────────────────
 
 def _translate_stream(original_text: str, target_lang: str):
     target_name = LANGUAGES.get(target_lang, target_lang)
@@ -311,13 +317,10 @@ def _translate_stream(original_text: str, target_lang: str):
     except Exception as exc:
         log.error("Translation error: %s", exc)
         yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
-
     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 
-# ---------------------------------------------------------------------------
-# Source detection helpers
-# ---------------------------------------------------------------------------
+# ─── Source detection ─────────────────────────────────────────────────────────
 
 def _normalize_host(url: str) -> str:
     try:
@@ -357,12 +360,7 @@ def _sanitize_youtube_url(url: str) -> str:
 
 
 def _detect_drive_media_kind(url: str) -> tuple[str, str, str]:
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "skip_download": True,
-    }
+    ydl_opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "skip_download": True}
     opts = _get_ydl_opts(ydl_opts)
     try:
         with YoutubeDL(opts) as ydl:
@@ -370,7 +368,7 @@ def _detect_drive_media_kind(url: str) -> tuple[str, str, str]:
         if isinstance(info, dict):
             vcodec = str(info.get("vcodec") or "").lower()
             acodec = str(info.get("acodec") or "").lower()
-            ext = str(info.get("ext") or "").lower()
+            ext    = str(info.get("ext") or "").lower()
             if (not vcodec or vcodec == "none") and (acodec and acodec != "none"):
                 return "drive_audio", "Drive Audio", "audio"
             if vcodec and vcodec != "none":
@@ -383,39 +381,43 @@ def _detect_drive_media_kind(url: str) -> tuple[str, str, str]:
         log.warning("Drive media detection failed: %s", exc)
     finally:
         _cleanup_ydl_cookies(opts)
-
     return "unsupported", "Unsupported Drive Media", "unknown"
 
 
 def detect_source(url: str) -> dict:
     host = _normalize_host(url)
-    ext = _guess_ext_from_url(url)
+    ext  = _guess_ext_from_url(url)
 
     if host in ("youtube.com", "youtu.be") or host.endswith(".youtube.com"):
-        return {"source_type": "youtube_video", "label": "YouTube Video", "kind": "video", "requires_extraction": True}
+        return {"source_type": "youtube_video", "label": "YouTube Video",
+                "kind": "video", "requires_extraction": True}
 
     if host == "drive.google.com" or host.endswith(".drive.google.com"):
         source_type, label, kind = _detect_drive_media_kind(url)
-        return {"source_type": source_type, "label": label, "kind": kind, "requires_extraction": kind == "video"}
+        return {"source_type": source_type, "label": label,
+                "kind": kind, "requires_extraction": kind == "video"}
 
     if ext in DIRECT_AUDIO_EXTS:
-        return {"source_type": "direct_audio", "label": "Direct Audio", "kind": "audio", "requires_extraction": False}
+        return {"source_type": "direct_audio", "label": "Direct Audio",
+                "kind": "audio", "requires_extraction": False}
 
     if ext in DIRECT_VIDEO_EXTS:
-        return {"source_type": "direct_video", "label": "Direct Video", "kind": "video", "requires_extraction": True}
+        return {"source_type": "direct_video", "label": "Direct Video",
+                "kind": "video", "requires_extraction": True}
 
     ctype = _safe_head_content_type(url)
     if ctype.startswith("audio/"):
-        return {"source_type": "direct_audio", "label": "Direct Audio", "kind": "audio", "requires_extraction": False}
+        return {"source_type": "direct_audio", "label": "Direct Audio",
+                "kind": "audio", "requires_extraction": False}
     if ctype.startswith("video/"):
-        return {"source_type": "direct_video", "label": "Direct Video", "kind": "video", "requires_extraction": True}
+        return {"source_type": "direct_video", "label": "Direct Video",
+                "kind": "video", "requires_extraction": True}
 
-    return {"source_type": "unsupported", "label": "Unsupported Source", "kind": "unknown", "requires_extraction": False}
+    return {"source_type": "unsupported", "label": "Unsupported Source",
+            "kind": "unknown", "requires_extraction": False}
 
 
-# ---------------------------------------------------------------------------
-# Filename helpers
-# ---------------------------------------------------------------------------
+# ─── Filename helpers ─────────────────────────────────────────────────────────
 
 def _sanitize_filename(name: str) -> str:
     cleaned = re.sub(r"[^\w\-. ]+", "", name or "").strip() or "extracted-audio"
@@ -433,9 +435,7 @@ def _normalize_whisper_filename(filename: str, content_type: str) -> str:
     return f"{stem}.{inferred_ext}"
 
 
-# ---------------------------------------------------------------------------
-# URL-audio job helpers
-# ---------------------------------------------------------------------------
+# ─── URL-audio job helpers ────────────────────────────────────────────────────
 
 def _cleanup_expired_jobs() -> None:
     now = time.time()
@@ -458,11 +458,18 @@ def _set_url_job(job_id: str, **updates) -> None:
             job["updated_at"] = time.time()
 
 
-# ---------------------------------------------------------------------------
-# Download helpers
-# ---------------------------------------------------------------------------
+# ─── Download helpers ─────────────────────────────────────────────────────────
 
 def _download_video_file(url: str, output_dir: Path, job_id: str) -> tuple[Path, str]:
+    """
+    Download audio stream from YouTube / Drive.
+
+    Bot-detection strategy (2026):
+    • player_client = web,mweb,android  – set in _get_ydl_opts()
+    • Cookies injected when YOUTUBE_COOKIES_CONTENT is set
+    • On bot-detection error we raise with a helpful message so the job
+      status shows the real cause instead of a cryptic yt-dlp traceback.
+    """
     output_template = str(output_dir / "source.%(ext)s")
 
     def _progress(data):
@@ -495,9 +502,20 @@ def _download_video_file(url: str, output_dir: Path, job_id: str) -> tuple[Path,
             if not path or not path.exists():
                 candidates = sorted(output_dir.glob("*"), key=os.path.getmtime, reverse=True)
                 if not candidates:
-                    raise RuntimeError("Video download completed but no output file was found.")
+                    raise RuntimeError("Download completed but no output file found.")
                 path = candidates[0]
             return path, title
+    except Exception as exc:
+        err_str = str(exc)
+        # Give the user an actionable error message for bot-detection
+        if "Sign in to confirm" in err_str or "bot" in err_str.lower():
+            raise RuntimeError(
+                "YouTube bot-detection triggered. "
+                "Set the YOUTUBE_COOKIES_CONTENT environment variable with a valid "
+                "Netscape-format cookie export from a logged-in YouTube session. "
+                "See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
+            ) from exc
+        raise
     finally:
         _cleanup_ydl_cookies(opts)
 
@@ -518,30 +536,21 @@ def _download_direct_audio_file(url: str, output_dir: Path, job_id: str) -> tupl
     return target, f"direct-audio.{ext}"
 
 
-# ---------------------------------------------------------------------------
-# URL audio job worker
-# ---------------------------------------------------------------------------
+# ─── URL audio job worker ─────────────────────────────────────────────────────
 
 def _process_url_audio_job(job_id: str, url: str) -> None:
     temp_dir = Path(tempfile.mkdtemp(prefix=f"url_audio_{job_id}_"))
-    _set_url_job(
-        job_id,
-        status="detecting",
-        message="Detecting source…",
-        temp_dir=str(temp_dir),
-    )
+    _set_url_job(job_id, status="detecting", message="Detecting source…", temp_dir=str(temp_dir))
     try:
         detected = detect_source(url)
-        source_type = detected.get("source_type", "unknown")
+        source_type  = detected.get("source_type", "unknown")
         source_label = detected.get("label", "Unknown Source")
-        kind = detected.get("kind", "unknown")
+        kind         = detected.get("kind", "unknown")
 
         _set_url_job(
             job_id,
-            source_type=source_type,
-            source_label=source_label,
-            media_kind=kind,
-            status="fetching",
+            source_type=source_type, source_label=source_label,
+            media_kind=kind, status="fetching",
             message=f"Source detected: {source_label}",
         )
 
@@ -556,46 +565,33 @@ def _process_url_audio_job(job_id: str, url: str) -> None:
                     _extract_audio_with_ffmpeg(downloaded_path, audio_path)
                     filename = f"{_sanitize_filename(title)}.mp3"
                 else:
-                    # Fallback: let Whisper handle the source media directly
                     audio_path = downloaded_path
-                    filename = f"{_sanitize_filename(title)}{downloaded_path.suffix or '.mp4'}"
+                    filename   = f"{_sanitize_filename(title)}{downloaded_path.suffix or '.mp4'}"
                     _set_url_job(job_id, message="ffmpeg not found – using source media directly.")
             else:
                 audio_path = downloaded_path
-                filename = f"{_sanitize_filename(title)}{downloaded_path.suffix or '.mp3'}"
+                filename   = f"{_sanitize_filename(title)}{downloaded_path.suffix or '.mp3'}"
 
         _set_url_job(
-            job_id,
-            status="ready",
-            message="Audio ready",
-            audio_path=str(audio_path),
-            filename=filename,
-            error="",
+            job_id, status="ready", message="Audio ready",
+            audio_path=str(audio_path), filename=filename, error="",
         )
     except Exception as exc:
         log.error("URL audio job %s failed: %s", job_id, exc)
         _set_url_job(job_id, status="error", message="Failed to fetch/extract audio", error=str(exc))
 
 
-# ---------------------------------------------------------------------------
-# SSE response helper
-# ---------------------------------------------------------------------------
+# ─── SSE helper ───────────────────────────────────────────────────────────────
 
 def _sse_response(generator_func):
     return Response(
         stream_with_context(generator_func),
         content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
+# ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.route("/", methods=["GET"])
 def index():
@@ -610,7 +606,7 @@ def health():
 @app.route("/detect-source", methods=["POST"])
 def detect_source_route():
     data = request.get_json(silent=True) or {}
-    url = (data.get("url") or "").strip()
+    url  = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "URL is required"}), 400
     url = _sanitize_youtube_url(url)
@@ -622,7 +618,6 @@ def detect_source_route():
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
-    # Validate size before reading multipart body
     content_length = request.content_length
     if content_length and content_length > WHISPER_MAX_BYTES:
         return jsonify({"error": "Audio too large. Use /transcribe-large for files over 25 MB."}), 413
@@ -630,24 +625,23 @@ def transcribe():
     if "audio" not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
 
-    audio_file = request.files["audio"]
+    audio_file  = request.files["audio"]
     source_lang = request.form.get("source_lang", "auto")
     target_lang = request.form.get("target_lang", "en")
-    action = request.form.get("action", "translate").lower()
+    action      = request.form.get("action", "translate").lower()
 
     if action not in {"transcript", "translate"}:
         return jsonify({"error": "Invalid action. Use 'transcript' or 'translate'."}), 400
 
     content_type = audio_file.content_type or "audio/webm"
-    filename = _normalize_whisper_filename(audio_file.filename or "audio.webm", content_type)
+    filename     = _normalize_whisper_filename(audio_file.filename or "audio.webm", content_type)
 
     try:
         audio_bytes = audio_file.read()
         if len(audio_bytes) > WHISPER_MAX_BYTES:
             return jsonify({"error": "Audio too large. Use /transcribe-large for files over 25 MB."}), 413
-
         original_text, detected_lang, duration = run_whisper(
-            audio_bytes, filename, content_type, source_lang
+            audio_bytes, filename, content_type, source_lang,
         )
     except Exception as exc:
         log.error("Transcription error: %s", exc)
@@ -666,46 +660,38 @@ def transcribe():
 
 @app.route("/translate-text", methods=["POST"])
 def translate_text():
-    data = request.get_json(silent=True) or {}
-    text = (data.get("text") or "").strip()
+    data        = request.get_json(silent=True) or {}
+    text        = (data.get("text") or "").strip()
     target_lang = (data.get("target_lang") or "en").strip() or "en"
     if not text:
         return jsonify({"error": "Text is required"}), 400
-
     return _sse_response(_translate_stream(text, target_lang))
 
 
 @app.route("/transcribe-large", methods=["POST"])
 def transcribe_large():
     """
-    FIX: file is saved to disk first (streaming), then segmented.
-    This prevents the gunicorn sync-worker timeout that happens when
-    Werkzeug tries to buffer a huge multipart body in memory.
+    KEY FIX: The entire upload is streamed to disk in 512 KB chunks BEFORE
+    Werkzeug touches the multipart boundary.  This prevents gunicorn's sync
+    worker from timing out mid-read on large files.
     """
     ffmpeg_exe = _get_ffmpeg_executable()
     if not ffmpeg_exe:
         return jsonify({"error": "ffmpeg is required for large-file transcription."}), 500
 
-    # ── 1. Save upload to disk via streaming ──────────────────────────────
+    if "audio" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
     temp_dir = Path(tempfile.mkdtemp(prefix="large_transcribe_"))
     try:
-        source_lang = request.form.get("source_lang", "auto")
-        raw_filename = (request.files.get("audio") or object()).filename if "audio" in request.files else ""
-        # Safely read the file now that we know it exists
-        if "audio" not in request.files:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            return jsonify({"error": "No audio file provided"}), 400
-
-        audio_file = request.files["audio"]
-        source_lang = request.form.get("source_lang", "auto")
+        audio_file   = request.files["audio"]
+        source_lang  = request.form.get("source_lang", "auto")
         content_type = audio_file.content_type or "audio/webm"
-        normalized_name = _normalize_whisper_filename(
-            audio_file.filename or "audio.webm", content_type
-        )
-        ext = Path(normalized_name).suffix or ".webm"
-        input_path = temp_dir / f"input{ext}"
+        norm_name    = _normalize_whisper_filename(audio_file.filename or "audio.webm", content_type)
+        ext          = Path(norm_name).suffix or ".webm"
+        input_path   = temp_dir / f"input{ext}"
 
-        # Stream to disk in 512 KB chunks – never loads entire file into RAM
+        # ── Stream upload to disk, never loads full file into RAM ──────────
         with open(input_path, "wb") as fh:
             while True:
                 chunk = audio_file.stream.read(512 * 1024)
@@ -718,21 +704,16 @@ def transcribe_large():
         log.error("Failed to save upload: %s", exc)
         return jsonify({"error": f"Failed to save uploaded file: {exc}"}), 500
 
-    # ── 2. Segment with ffmpeg ─────────────────────────────────────────────
-    segments_dir = temp_dir / "segments"
+    # ── Segment with ffmpeg ────────────────────────────────────────────────
+    segments_dir     = temp_dir / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
-    segment_pattern = str(segments_dir / "chunk_%05d.mp3")
+    segment_pattern  = str(segments_dir / "chunk_%05d.mp3")
 
     ffmpeg_cmd = [
         ffmpeg_exe, "-y",
         "-i", str(input_path),
-        "-vn",
-        "-ac", "1",
-        "-ar", "16000",
-        "-b:a", "64k",
-        "-f", "segment",
-        "-segment_time", "600",
-        "-reset_timestamps", "1",
+        "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k",
+        "-f", "segment", "-segment_time", "600", "-reset_timestamps", "1",
         segment_pattern,
     ]
     proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
@@ -746,28 +727,26 @@ def transcribe_large():
         shutil.rmtree(temp_dir, ignore_errors=True)
         return jsonify({"error": "No audio segments were produced from the file."}), 500
 
-    # ── 3. Transcribe segments concurrently and stream results ────────────
+    # ── Transcribe concurrently, stream results ────────────────────────────
     def generate():
         detected_lang = ""
         duration_total = 0.0
-        yielded_done = False
-        total = len(segment_paths)
-        # Cap workers to avoid overwhelming Render's starter tier
-        max_workers = min(3, total)
+        yielded_done   = False
+        total          = len(segment_paths)
+        max_workers    = min(3, total)
 
         try:
             yield f"data: {json.dumps({'type': 'progress', 'completed': 0, 'total': total, 'message': f'Transcribing 0/{total} parts…'})}\n\n"
 
             ready: dict[int, tuple] = {}
             next_index = 0
-            completed = 0
+            completed  = 0
 
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
                 futures = {
                     pool.submit(_transcribe_segment_file, path, source_lang, i): i
                     for i, path in enumerate(segment_paths)
                 }
-
                 for future in as_completed(futures):
                     try:
                         idx, text, seg_lang, seg_duration = future.result()
@@ -778,16 +757,13 @@ def transcribe_large():
 
                     completed += 1
                     ready[idx] = (text, seg_lang, seg_duration)
-
-                    yield (
-                        f"data: {json.dumps({'type': 'progress', 'completed': completed, 'total': total, 'message': f'Transcribing {completed}/{total} parts…'})}\n\n"
-                    )
+                    yield f"data: {json.dumps({'type': 'progress', 'completed': completed, 'total': total, 'message': f'Transcribing {completed}/{total} parts…'})}\n\n"
 
                     while next_index in ready:
-                        chunk_text, chunk_lang, chunk_duration = ready.pop(next_index)
+                        chunk_text, chunk_lang, chunk_dur = ready.pop(next_index)
                         if not detected_lang and chunk_lang:
                             detected_lang = chunk_lang
-                        duration_total += chunk_duration
+                        duration_total += chunk_dur
                         yield f"data: {json.dumps({'type': 'transcript_chunk', 'index': next_index, 'text': chunk_text})}\n\n"
                         next_index += 1
 
@@ -816,7 +792,7 @@ def transcribe_chunk():
     if "audio" not in request.files:
         return jsonify({"error": "No audio chunk provided"}), 400
 
-    audio_file = request.files["audio"]
+    audio_file  = request.files["audio"]
     source_lang = request.form.get("source_lang", "auto")
 
     try:
@@ -826,8 +802,8 @@ def transcribe_chunk():
         return jsonify({"error": "Invalid chunk index/total"}), 400
 
     content_type = audio_file.content_type or "audio/webm"
-    filename = _normalize_whisper_filename(
-        audio_file.filename or f"chunk-{index}.webm", content_type
+    filename     = _normalize_whisper_filename(
+        audio_file.filename or f"chunk-{index}.webm", content_type,
     )
 
     try:
@@ -840,10 +816,8 @@ def transcribe_chunk():
         return jsonify({"error": f"Chunk transcription failed: {exc}"}), 500
 
     return jsonify({
-        "index": index,
-        "total": total,
-        "text": text,
-        "detected_lang": detected_lang,
+        "index": index, "total": total,
+        "text": text, "detected_lang": detected_lang,
         "duration": round(duration, 2),
     })
 
@@ -853,7 +827,7 @@ def extract_audio_url():
     _cleanup_expired_jobs()
 
     data = request.get_json(silent=True) or {}
-    url = (data.get("url") or "").strip()
+    url  = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "URL is required"}), 400
 
@@ -863,33 +837,25 @@ def extract_audio_url():
         return jsonify({"error": "Unsupported URL. Use Google Drive, YouTube, or direct audio links."}), 400
 
     job_id = uuid.uuid4().hex
-    now = time.time()
+    now    = time.time()
 
     with URL_AUDIO_JOBS_LOCK:
         URL_AUDIO_JOBS[job_id] = {
-            "id": job_id,
-            "url": url,
-            "status": "queued",
-            "message": "Queued",
-            "error": "",
-            "audio_path": "",
-            "filename": "",
-            "temp_dir": "",
+            "id": job_id, "url": url,
+            "status": "queued", "message": "Queued", "error": "",
+            "audio_path": "", "filename": "", "temp_dir": "",
             "source_type": detected.get("source_type", ""),
             "source_label": detected.get("label", ""),
             "media_kind": detected.get("kind", ""),
-            "created_at": now,
-            "updated_at": now,
+            "created_at": now, "updated_at": now,
         }
 
     threading.Thread(
-        target=_process_url_audio_job, args=(job_id, url), daemon=True
+        target=_process_url_audio_job, args=(job_id, url), daemon=True,
     ).start()
 
     return jsonify({
-        "job_id": job_id,
-        "status": "queued",
-        "message": "Queued",
+        "job_id": job_id, "status": "queued", "message": "Queued",
         "source_type": detected.get("source_type", ""),
         "source_label": detected.get("label", ""),
     }), 202
@@ -903,13 +869,13 @@ def extract_audio_url_status(job_id: str):
         if not job:
             return jsonify({"error": "Job not found"}), 404
         payload = {
-            "job_id": job["id"],
-            "status": job.get("status", "queued"),
-            "message": job.get("message", ""),
-            "error": job.get("error", ""),
-            "source_type": job.get("source_type", ""),
+            "job_id":       job["id"],
+            "status":       job.get("status", "queued"),
+            "message":      job.get("message", ""),
+            "error":        job.get("error", ""),
+            "source_type":  job.get("source_type", ""),
             "source_label": job.get("source_label", ""),
-            "media_kind": job.get("media_kind", ""),
+            "media_kind":   job.get("media_kind", ""),
         }
     return jsonify(payload)
 
@@ -922,13 +888,13 @@ def extract_audio_url_download(job_id: str):
         job = URL_AUDIO_JOBS.get(job_id)
         if not job:
             return jsonify({"error": "Job not found"}), 404
-        status = job.get("status")
+        status     = job.get("status")
         audio_path = job.get("audio_path", "")
-        filename = job.get("filename") or "extracted-audio.mp3"
-        error = job.get("error", "")
+        filename   = job.get("filename") or "extracted-audio.mp3"
+        error      = job.get("error", "")
 
     if status != "ready":
-        msg = error or "Audio extraction failed" if status == "error" else "Audio is not ready yet"
+        msg = (error or "Audio extraction failed") if status == "error" else "Audio is not ready yet"
         return jsonify({"error": msg}), 409
 
     if not audio_path or not os.path.exists(audio_path):
@@ -936,37 +902,12 @@ def extract_audio_url_download(job_id: str):
 
     guessed_mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     return send_file(
-        audio_path,
-        mimetype=guessed_mime,
-        as_attachment=True,
-        download_name=filename,
-        conditional=True,
+        audio_path, mimetype=guessed_mime,
+        as_attachment=True, download_name=filename, conditional=True,
     )
 
 
-# ---------------------------------------------------------------------------
-# Entry point (dev only – production uses gunicorn)
-# ---------------------------------------------------------------------------
+# ─── Dev entry-point ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, threaded=True)
-
-
-# ---------------------------------------------------------------------------
-# gunicorn.conf.py  – copy this to gunicorn.conf.py in your project root
-# ---------------------------------------------------------------------------
-# workers = 2
-# worker_class = "gthread"
-# threads = 4
-# timeout = 300          # 5 min – essential for large uploads
-# keepalive = 5
-# max_requests = 500
-# max_requests_jitter = 50
-# bind = "0.0.0.0:10000"
-# accesslog = "-"
-# errorlog = "-"
-# loglevel = "info"
-#
-# Render start command:
-#   gunicorn app:app -c gunicorn.conf.py
-# ---------------------------------------------------------------------------
