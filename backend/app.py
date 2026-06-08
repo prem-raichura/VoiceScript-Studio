@@ -102,6 +102,27 @@ MIME_TO_AUDIO_EXT = {
 # Current working cascade (as of yt-dlp 2026.03.x): web → mweb → android
 YOUTUBE_PLAYER_CLIENTS = ["web", "mweb", "android"]
 
+# Format selection fallback chain.
+#
+# Why a chain is needed (2026):
+#   • "bestaudio/best" fails when the active client returns only muxed HLS
+#     streams (ANDR-V flag) with no standalone audio track.
+#   • Each entry is tried in order; the first one that produces a file wins.
+#   • Entry breakdown:
+#       1. bestaudio[ext=m4a]        – best standalone AAC (no ffmpeg merge)
+#       2. bestaudio[ext=webm]        – best standalone Opus
+#       3. bestaudio                  – best standalone audio, any codec
+#       4. best[height<=480]          – smallest muxed stream (audio included)
+#       5. best                        – absolute last resort: any muxed stream
+#
+# The list is tried sequentially by _download_video_file(); yt-dlp itself
+# never sees more than one entry at a time so there is no ambiguity.
+YOUTUBE_FORMAT_CHAIN = [
+    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+    "best[height<=480]",
+    "best",
+]
+
 URL_AUDIO_JOBS: dict = {}
 URL_AUDIO_JOBS_LOCK = threading.Lock()
 
@@ -460,15 +481,32 @@ def _set_url_job(job_id: str, **updates) -> None:
 
 # ─── Download helpers ─────────────────────────────────────────────────────────
 
+def _find_downloaded_file(output_dir: Path) -> Path | None:
+    """Return the most-recently modified file in output_dir, or None."""
+    candidates = sorted(output_dir.glob("*"), key=os.path.getmtime, reverse=True)
+    return candidates[0] if candidates else None
+
+
 def _download_video_file(url: str, output_dir: Path, job_id: str) -> tuple[Path, str]:
     """
-    Download audio stream from YouTube / Drive.
+    Download the best available audio from YouTube / Drive.
 
-    Bot-detection strategy (2026):
-    • player_client = web,mweb,android  – set in _get_ydl_opts()
-    • Cookies injected when YOUTUBE_COOKIES_CONTENT is set
-    • On bot-detection error we raise with a helpful message so the job
-      status shows the real cause instead of a cryptic yt-dlp traceback.
+    2026 "Requested format is not available" fix
+    ─────────────────────────────────────────────
+    When a client only returns muxed HLS streams (no standalone audio track),
+    `bestaudio` raises "Requested format is not available".  We now iterate
+    over YOUTUBE_FORMAT_CHAIN, trying each format string until one succeeds.
+    If every format in the chain fails we also retry with a different player
+    client subset before giving up.
+
+    Retry matrix
+    ────────────
+      Round 1 – all clients  (web, mweb, android)  × YOUTUBE_FORMAT_CHAIN
+      Round 2 – web only                            × YOUTUBE_FORMAT_CHAIN
+      Round 3 – mweb only                           × YOUTUBE_FORMAT_CHAIN
+
+    This covers the most common 2026 failure modes without hammering YouTube
+    with dozens of requests.
     """
     output_template = str(output_dir / "source.%(ext)s")
 
@@ -480,44 +518,94 @@ def _download_video_file(url: str, output_dir: Path, job_id: str) -> tuple[Path,
                 pct = int(downloaded / total * 100)
                 _set_url_job(job_id, message=f"Fetching video… {pct}%")
 
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": output_template,
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "progress_hooks": [_progress],
-    }
-    opts = _get_ydl_opts(ydl_opts)
-    try:
-        with YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = info.get("title") or "video-audio"
-            path: Path | None = None
-            requested = info.get("requested_downloads") or []
-            if requested and requested[0].get("filepath"):
-                path = Path(requested[0]["filepath"])
-            if not path:
-                path = Path(ydl.prepare_filename(info))
-            if not path or not path.exists():
-                candidates = sorted(output_dir.glob("*"), key=os.path.getmtime, reverse=True)
-                if not candidates:
-                    raise RuntimeError("Download completed but no output file found.")
-                path = candidates[0]
-            return path, title
-    except Exception as exc:
-        err_str = str(exc)
-        # Give the user an actionable error message for bot-detection
-        if "Sign in to confirm" in err_str or "bot" in err_str.lower():
-            raise RuntimeError(
-                "YouTube bot-detection triggered. "
-                "Set the YOUTUBE_COOKIES_CONTENT environment variable with a valid "
-                "Netscape-format cookie export from a logged-in YouTube session. "
-                "See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
-            ) from exc
-        raise
-    finally:
-        _cleanup_ydl_cookies(opts)
+    # client subsets to try across rounds
+    client_rounds: list[list[str]] = [
+        YOUTUBE_PLAYER_CLIENTS,         # round 1: all clients
+        ["web"],                         # round 2: web only (most formats)
+        ["mweb"],                        # round 3: mweb fallback
+    ]
+
+    last_exc: Exception | None = None
+
+    for round_idx, clients in enumerate(client_rounds, start=1):
+        for fmt in YOUTUBE_FORMAT_CHAIN:
+            # Clean up any partial files from a previous attempt
+            for f in output_dir.glob("source.*"):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+
+            ydl_opts = {
+                "format": fmt,
+                "outtmpl": output_template,
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "progress_hooks": [_progress],
+            }
+            opts = _get_ydl_opts(ydl_opts)
+            # Override client list for this specific round
+            opts["extractor_args"]["youtube"]["player_client"] = clients
+
+            log.debug(
+                "yt-dlp attempt – round %d, clients=%s, format=%r",
+                round_idx, clients, fmt,
+            )
+            _set_url_job(
+                job_id,
+                message=f"Fetching video… (round {round_idx}, format: {fmt[:40]})",
+            )
+
+            try:
+                with YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    title = info.get("title") or "video-audio"
+                    path: Path | None = None
+                    requested = info.get("requested_downloads") or []
+                    if requested and requested[0].get("filepath"):
+                        path = Path(requested[0]["filepath"])
+                    if not path:
+                        path = Path(ydl.prepare_filename(info))
+                    if not path or not path.exists():
+                        path = _find_downloaded_file(output_dir)
+                    if not path or not path.exists():
+                        raise RuntimeError("Download completed but no output file found.")
+                    log.info(
+                        "yt-dlp success – round %d clients=%s fmt=%r → %s",
+                        round_idx, clients, fmt, path.name,
+                    )
+                    return path, title
+
+            except Exception as exc:
+                err_str = str(exc)
+                _cleanup_ydl_cookies(opts)
+
+                # Bot detection – no point retrying formats, raise immediately
+                if "Sign in to confirm" in err_str or "bot" in err_str.lower():
+                    raise RuntimeError(
+                        "YouTube bot-detection triggered. "
+                        "Set the YOUTUBE_COOKIES_CONTENT environment variable with a "
+                        "valid Netscape-format cookie export from a logged-in YouTube "
+                        "session. See https://github.com/yt-dlp/yt-dlp/wiki/FAQ"
+                        "#how-do-i-pass-cookies-to-yt-dlp"
+                    ) from exc
+
+                log.debug(
+                    "yt-dlp attempt failed (round %d, clients=%s, fmt=%r): %s",
+                    round_idx, clients, fmt, err_str[:200],
+                )
+                last_exc = exc
+                continue  # try next format / next client round
+
+            finally:
+                _cleanup_ydl_cookies(opts)
+
+    # All rounds exhausted
+    raise RuntimeError(
+        f"Could not download audio after trying all format/client combinations. "
+        f"Last error: {last_exc}"
+    ) from last_exc
 
 
 def _download_direct_audio_file(url: str, output_dir: Path, job_id: str) -> tuple[Path, str]:
