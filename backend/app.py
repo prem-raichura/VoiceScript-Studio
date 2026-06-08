@@ -26,7 +26,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 1288490188  # 1.2 GB
-CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:5173"])
+CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:5173", "https://voice-script-studio.vercel.app", "https://voicescript-studio.vercel.app"])
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
