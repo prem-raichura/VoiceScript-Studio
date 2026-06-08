@@ -471,6 +471,11 @@ def _process_url_audio_job(job_id, url):
         _set_url_job(job_id, status="error", message="Failed to fetch/extract audio", error=str(e))
 
 
+@app.route("/", methods=["GET"])
+def index():
+    return "VoiceScript Studio API is running."
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
