@@ -137,12 +137,21 @@ def _is_video_content_type(content_type):
 def _get_ydl_opts(base_opts=None):
     opts = base_opts.copy() if base_opts else {}
     
-    # Check for cookies file via environment variable, or default to cookies.txt in the backend dir
+    # Try multiple common paths for the cookies file on Render
     cookies_file = os.getenv("YOUTUBE_COOKIES_FILE")
     if cookies_file and os.path.exists(cookies_file):
         opts["cookiefile"] = cookies_file
     elif os.path.exists("cookies.txt"):
         opts["cookiefile"] = "cookies.txt"
+    elif os.path.exists("/etc/secrets/cookies.txt"):
+        opts["cookiefile"] = "/etc/secrets/cookies.txt"
+        
+    # Set extractor args to bypass bot detection by mimicking a mobile client
+    if "extractor_args" not in opts:
+        opts["extractor_args"] = {}
+    if "youtube" not in opts["extractor_args"]:
+        opts["extractor_args"]["youtube"] = {}
+    opts["extractor_args"]["youtube"]["player_client"] = ["android", "ios"]
         
     return opts
 
