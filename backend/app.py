@@ -138,13 +138,22 @@ def _get_ydl_opts(base_opts=None):
     opts = base_opts.copy() if base_opts else {}
     
     # Try multiple common paths for the cookies file on Render
-    cookies_file = os.getenv("YOUTUBE_COOKIES_FILE")
-    if cookies_file and os.path.exists(cookies_file):
-        opts["cookiefile"] = cookies_file
-    elif os.path.exists("cookies.txt"):
-        opts["cookiefile"] = "cookies.txt"
-    elif os.path.exists("/etc/secrets/cookies.txt"):
-        opts["cookiefile"] = "/etc/secrets/cookies.txt"
+    # 1. Check for cookies content in an environment variable (easiest for Render env vars)
+    cookies_content = os.getenv("YOUTUBE_COOKIES_CONTENT")
+    if cookies_content:
+        temp_cookies_path = "/tmp/youtube_cookies.txt"
+        with open(temp_cookies_path, "w") as f:
+            f.write(cookies_content)
+        opts["cookiefile"] = temp_cookies_path
+    # 2. Check for cookies file via environment variable, or default to cookies.txt in the backend dir
+    else:
+        cookies_file = os.getenv("YOUTUBE_COOKIES_FILE")
+        if cookies_file and os.path.exists(cookies_file):
+            opts["cookiefile"] = cookies_file
+        elif os.path.exists("cookies.txt"):
+            opts["cookiefile"] = "cookies.txt"
+        elif os.path.exists("/etc/secrets/cookies.txt"):
+            opts["cookiefile"] = "/etc/secrets/cookies.txt"
         
     # Set extractor args to bypass bot detection by mimicking a mobile client
     if "extractor_args" not in opts:
@@ -402,7 +411,7 @@ def _download_video_file(url, output_dir, job_id):
                 _set_url_job(job_id, message=f"Fetching video... {pct}%")
 
     ydl_opts = {
-        "format": "best",
+        "format": "bestaudio/best",
         "outtmpl": output_template,
         "quiet": True,
         "no_warnings": True,
