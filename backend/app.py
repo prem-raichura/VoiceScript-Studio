@@ -155,9 +155,12 @@ def _get_ydl_opts(base_opts=None):
         elif os.path.exists("/etc/secrets/cookies.txt"):
             opts["cookiefile"] = "/etc/secrets/cookies.txt"
         
-    # We previously set player_client to ["android", "ios"] to bypass bot detection, 
-    # but this now causes "Requested format is not available" due to SABR/PO token restrictions.
-    # We now let yt-dlp use its default client array which includes working fallbacks (e.g. android_vr).
+    # Use android_vr client to bypass bot detection without losing formats or needing PO tokens.
+    if "extractor_args" not in opts:
+        opts["extractor_args"] = {}
+    if "youtube" not in opts["extractor_args"]:
+        opts["extractor_args"]["youtube"] = {}
+    opts["extractor_args"]["youtube"]["player_client"] = ["android_vr", "ios", "android"]
         
     return opts
 
@@ -186,9 +189,13 @@ def _detect_drive_media_kind(url):
                 return "drive_video", "Drive Video", "video"
             if ext in DIRECT_AUDIO_EXTS:
                 return "drive_audio", "Drive Audio", "audio"
+            if ext in DIRECT_VIDEO_EXTS:
+                return "drive_video", "Drive Video", "video"
+            
+            return "unsupported", "Unsupported Drive Media", "unknown"
     except Exception:
         pass
-    return "drive_video", "Drive Video", "video"
+    return "unsupported", "Unsupported Drive Media", "unknown"
 
 
 def _sanitize_youtube_url(url):
@@ -474,18 +481,25 @@ def _process_url_audio_job(job_id, url):
             audio_path, filename = _download_direct_audio_file(url, temp_dir, job_id)
         else:
             downloaded_path, title = _download_video_file(url, temp_dir, job_id)
-            _set_url_job(job_id, status="extracting", message="Extracting audio...")
+            if kind == "video":
+                _set_url_job(job_id, status="extracting", message="Extracting audio...")
 
-            if _get_ffmpeg_executable():
-                audio_path = temp_dir / "audio.mp3"
-                _extract_audio_with_ffmpeg(downloaded_path, audio_path)
-                filename = f"{_sanitize_filename(title)}.mp3"
+                if _get_ffmpeg_executable():
+                    audio_path = temp_dir / "audio.mp3"
+                    _extract_audio_with_ffmpeg(downloaded_path, audio_path)
+                    filename = f"{_sanitize_filename(title)}.mp3"
+                else:
+                    # Fallback when ffmpeg is unavailable: keep source media and let Whisper transcribe it directly.
+                    audio_path = downloaded_path
+                    ext = downloaded_path.suffix or ".mp4"
+                    filename = f"{_sanitize_filename(title)}{ext}"
+                    _set_url_job(job_id, message="ffmpeg not found: using source media directly.")
             else:
-                # Fallback when ffmpeg is unavailable: keep source media and let Whisper transcribe it directly.
+                # If kind is audio, no extraction needed. Treat as direct audio.
                 audio_path = downloaded_path
-                ext = downloaded_path.suffix or ".mp4"
+                ext = downloaded_path.suffix or ".mp3"
                 filename = f"{_sanitize_filename(title)}{ext}"
-                _set_url_job(job_id, message="ffmpeg not found: using source media directly.")
+                _set_url_job(job_id, message="Direct audio detected: skipping extraction.")
 
         _set_url_job(
             job_id,
