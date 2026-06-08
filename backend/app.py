@@ -155,12 +155,9 @@ def _get_ydl_opts(base_opts=None):
         elif os.path.exists("/etc/secrets/cookies.txt"):
             opts["cookiefile"] = "/etc/secrets/cookies.txt"
         
-    # Set extractor args to bypass bot detection by mimicking a mobile client
-    if "extractor_args" not in opts:
-        opts["extractor_args"] = {}
-    if "youtube" not in opts["extractor_args"]:
-        opts["extractor_args"]["youtube"] = {}
-    opts["extractor_args"]["youtube"]["player_client"] = ["android", "ios"]
+    # We previously set player_client to ["android", "ios"] to bypass bot detection, 
+    # but this now causes "Requested format is not available" due to SABR/PO token restrictions.
+    # We now let yt-dlp use its default client array which includes working fallbacks (e.g. android_vr).
         
     return opts
 
