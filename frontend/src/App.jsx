@@ -20,6 +20,7 @@ import LanguageSelector from './components/LanguageSelector'
 import History from './components/History'
 
 const LARGE_FILE_THRESHOLD_BYTES = 1 * 1024 * 1024
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 const PIPELINE_STEPS = [
   { id: 'input', label: '1. Input Received' },
@@ -342,7 +343,7 @@ export default function App() {
       form.append('target_lang', targetLang)
       form.append('action', action)
 
-      const res = await fetch('/transcribe', { method: 'POST', body: form, signal: controller.signal })
+      const res = await fetch(`${API_BASE}/transcribe`, { method: 'POST', body: form, signal: controller.signal })
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}))
         throw new Error(payload.error || `Server error (${res.status})`)
@@ -442,7 +443,7 @@ export default function App() {
       form.append('audio', blob, filename)
       form.append('source_lang', sourceLang)
 
-      const res = await fetch('/transcribe-large', { method: 'POST', body: form, signal: controller.signal })
+      const res = await fetch(`${API_BASE}/transcribe-large`, { method: 'POST', body: form, signal: controller.signal })
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}))
         throw new Error(payload.error || `Server error (${res.status})`)
@@ -518,7 +519,7 @@ export default function App() {
     let finalTranslation = ''
 
     try {
-      const res = await fetch('/translate-text', {
+      const res = await fetch(`${API_BASE}/translate-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText, target_lang: targetLang }),
@@ -579,7 +580,7 @@ export default function App() {
   }, [appendHistory, setPipeline, targetLang])
 
   const detectSource = useCallback(async (url, signal) => {
-    const res = await fetch('/detect-source', {
+    const res = await fetch(`${API_BASE}/detect-source`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -618,7 +619,7 @@ export default function App() {
         setPipeline('transcribe', 'Preparing audio...')
       }
 
-      const startRes = await fetch('/extract-audio-url', {
+      const startRes = await fetch(`${API_BASE}/extract-audio-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
@@ -633,7 +634,7 @@ export default function App() {
       let ready = false
       while (!ready) {
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        const statusRes = await fetch(`/extract-audio-url/status/${jobId}`, { signal: controller.signal })
+        const statusRes = await fetch(`${API_BASE}/extract-audio-url/status/${jobId}`, { signal: controller.signal })
         const statusData = await statusRes.json().catch(() => ({}))
         if (!statusRes.ok) throw new Error(statusData.error || 'Could not read source processing status.')
 
@@ -657,7 +658,7 @@ export default function App() {
         if (stage === 'ready') ready = true
       }
 
-      const downloadRes = await fetch(`/extract-audio-url/download/${jobId}`, { signal: controller.signal })
+      const downloadRes = await fetch(`${API_BASE}/extract-audio-url/download/${jobId}`, { signal: controller.signal })
       if (!downloadRes.ok) {
         const payload = await downloadRes.json().catch(() => ({}))
         throw new Error(payload.error || 'Could not download prepared audio.')
