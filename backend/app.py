@@ -134,6 +134,19 @@ def _is_video_content_type(content_type):
     return bool(content_type and content_type.startswith("video/"))
 
 
+def _get_ydl_opts(base_opts=None):
+    opts = base_opts.copy() if base_opts else {}
+    
+    # Check for cookies file via environment variable, or default to cookies.txt in the backend dir
+    cookies_file = os.getenv("YOUTUBE_COOKIES_FILE")
+    if cookies_file and os.path.exists(cookies_file):
+        opts["cookiefile"] = cookies_file
+    elif os.path.exists("cookies.txt"):
+        opts["cookiefile"] = "cookies.txt"
+        
+    return opts
+
+
 def _detect_drive_media_kind(url):
     """
     Best effort detection for Google Drive links.
@@ -145,7 +158,7 @@ def _detect_drive_media_kind(url):
             "noplaylist": True,
             "skip_download": True,
         }
-        with YoutubeDL(ydl_opts) as ydl:
+        with YoutubeDL(_get_ydl_opts(ydl_opts)) as ydl:
             info = ydl.extract_info(url, download=False)
         if isinstance(info, dict):
             vcodec = str(info.get("vcodec") or "").lower()
@@ -388,7 +401,7 @@ def _download_video_file(url, output_dir, job_id):
         "progress_hooks": [progress_hook],
     }
 
-    with YoutubeDL(ydl_opts) as ydl:
+    with YoutubeDL(_get_ydl_opts(ydl_opts)) as ydl:
         info = ydl.extract_info(url, download=True)
         title = info.get("title") or "video-audio"
         path = None
