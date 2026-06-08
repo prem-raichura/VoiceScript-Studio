@@ -130,6 +130,8 @@ export default function TranscriptPanel({
   duration,
   detectedLang,
   sourceLabel,
+  action,
+  pipelineStep,
   onExportOriginal,
   onExportTranslation,
 }) {
@@ -179,19 +181,21 @@ export default function TranscriptPanel({
         icon={FileText}
         label="Transcript"
         text={original}
-        loading={loading && !original}
+        loading={loading && pipelineStep === 'transcribe' && !original}
         loadingLabel="Transcribing..."
         onExport={onExportOriginal}
       />
-      <Panel
-        icon={Languages}
-        label="Translation"
-        text={translation}
-        loading={loading}
-        loadingLabel="Translating..."
-        accent
-        onExport={onExportTranslation}
-      />
+      {action !== 'transcript' ? (
+        <Panel
+          icon={Languages}
+          label="Translation"
+          text={translation}
+          loading={loading && action === 'translate' && pipelineStep === 'translate'}
+          loadingLabel="Translating..."
+          accent
+          onExport={onExportTranslation}
+        />
+      ) : null}
 
       {isEmpty ? (
         <div className="text-center py-16 animate-fade-in">

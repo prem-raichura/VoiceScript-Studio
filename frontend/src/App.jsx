@@ -12,13 +12,14 @@ import {
   RefreshCw,
   RotateCcw,
   Sparkles,
+  X,
 } from 'lucide-react'
 import Uploader from './components/Uploader'
 import TranscriptPanel from './components/TranscriptPanel'
 import LanguageSelector from './components/LanguageSelector'
 import History from './components/History'
 
-const LARGE_FILE_THRESHOLD_BYTES = 24 * 1024 * 1024
+const LARGE_FILE_THRESHOLD_BYTES = 1 * 1024 * 1024
 
 const PIPELINE_STEPS = [
   { id: 'input', label: '1. Input Received' },
@@ -614,7 +615,7 @@ export default function App() {
       if (detected.requires_extraction) {
         setPipeline('extract', 'Extracting Audio...')
       } else {
-        setPipeline('extract', 'Preparing audio...')
+        setPipeline('transcribe', 'Preparing audio...')
       }
 
       const startRes = await fetch('/extract-audio-url', {
@@ -642,8 +643,14 @@ export default function App() {
 
         const stage = statusData.status || 'queued'
         const message = statusData.message || ''
-        if (stage === 'detecting') setPipeline('detect', message || 'Detecting Source...')
-        if (stage === 'fetching' || stage === 'extracting') setPipeline('extract', message || 'Extracting Audio...')
+        if (stage === 'detecting') {
+          if (detected.requires_extraction) setPipeline('detect', message || 'Detecting Source...')
+          else setPipeline('transcribe', message || 'Preparing audio...')
+        }
+        if (stage === 'fetching' || stage === 'extracting') {
+          if (detected.requires_extraction) setPipeline('extract', message || 'Extracting Audio...')
+          else setPipeline('transcribe', message || 'Fetching audio...')
+        }
         setSourceStatusMessage(message)
 
         if (stage === 'error') throw new Error(statusData.error || 'Source processing failed.')
@@ -660,7 +667,7 @@ export default function App() {
       const blob = await downloadRes.blob()
       setLastBlob(blob)
       setLastFilename(filename)
-      setPipeline('output', 'Output Generated')
+      setPipeline('transcribe', 'Ready to Transcribe')
       setSourceStatusMessage(`Audio ready: ${filename}`)
     } catch (err) {
       if (err.name === 'AbortError') return
@@ -682,7 +689,7 @@ export default function App() {
       requires_extraction: false,
       kind: 'audio',
     })
-    setPipeline('input', 'Input Received')
+    setPipeline('transcribe', 'Ready to Transcribe')
     setSourceStatusMessage(`Audio selected: ${filename}`)
   }, [])
 
@@ -911,11 +918,30 @@ export default function App() {
                     <Link2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-600" />
                     <input
                       value={sourceInput}
-                      onChange={(e) => setSourceInput(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setSourceInput(val)
+                        if (!val.trim()) {
+                          resetAll()
+                        }
+                      }}
                       disabled={busy}
                       placeholder="Paste Google Drive, YouTube, or direct audio link"
-                      className="w-full rounded-xl border border-white/80 bg-white/80 pl-9 pr-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent disabled:opacity-60"
+                      className="w-full rounded-xl border border-white/80 bg-white/80 pl-9 pr-10 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent disabled:opacity-60"
                     />
+                    {sourceInput ? (
+                      <button
+                        onClick={() => {
+                          setSourceInput('')
+                          resetAll()
+                        }}
+                        disabled={busy}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-50"
+                        title="Clear input"
+                      >
+                        <X size={14} />
+                      </button>
+                    ) : null}
                   </div>
                   <button onClick={fetchAudioFromInput} disabled={busy || !sourceInput.trim()} className="btn-brand px-4 py-2.5 text-xs">
                     {ingesting ? <Loader2 size={14} className="animate-spin" /> : null}
@@ -1013,6 +1039,8 @@ export default function App() {
               duration={duration}
               detectedLang={detectedLang}
               sourceLabel={sourceLabel}
+              action={lastAction}
+              pipelineStep={pipelineStep}
               onExportOriginal={(format) => exportData(format, 'transcript')}
               onExportTranslation={(format) => exportData(format, 'translation')}
             />
