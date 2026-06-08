@@ -24,7 +24,7 @@ export const SOURCE_LANGUAGES = [
 function Select({ value, onChange, options, disabled, label }) {
   return (
     <div className="flex-1 min-w-0">
-      <label className="block text-[10px] font-bold text-brand-400 mb-1.5 uppercase tracking-widest">{label}</label>
+      <label className="block text-[10px] font-bold text-indigo-600 mb-1.5 uppercase tracking-widest">{label}</label>
       <div className="relative">
         <select
           value={value}
@@ -36,7 +36,7 @@ function Select({ value, onChange, options, disabled, label }) {
             <option key={o.code} value={o.code}>{o.label}</option>
           ))}
         </select>
-        <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-brand-300">
+        <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-600">
           <ChevronDown size={14} />
         </div>
       </div>
@@ -61,8 +61,8 @@ export default function LanguageSelector({
         disabled={disabled}
       />
       <div className="flex-shrink-0 mb-3 flex flex-col items-center gap-0.5">
-        <div className="w-7 h-7 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center">
-          <Globe size={12} className="text-brand-400 animate-rotate-slow" />
+        <div className="w-7 h-7 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center">
+          <Globe size={12} className="text-indigo-600 animate-rotate-slow" />
         </div>
       </div>
       <Select

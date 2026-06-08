@@ -4,6 +4,8 @@ import {
   CheckCircle2,
   Circle,
   Download,
+  FileText,
+  Languages,
   Link2,
   Loader2,
   Mic,
@@ -825,51 +827,80 @@ export default function App() {
   }, [exportBundle, history, original, sourceLabel, translation])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-sky-50 to-cyan-50">
+    <div className="min-h-screen lg:h-screen w-full bg-transparent relative overflow-hidden text-slate-800 flex flex-col lg:flex-row">
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-24 -left-24 w-80 h-80 rounded-full bg-cyan-200/40 blur-3xl" />
-        <div className="absolute top-1/3 -right-16 w-72 h-72 rounded-full bg-sky-200/45 blur-3xl" />
-        <div className="absolute -bottom-16 left-1/3 w-72 h-72 rounded-full bg-blue-200/35 blur-3xl" />
+        <div className="absolute -top-24 -left-24 w-80 h-80 rounded-full bg-indigo-500/10 blur-[120px] animate-pulse-ring" />
+        <div className="absolute top-1/3 -right-16 w-72 h-72 rounded-full bg-violet-500/10 blur-[100px] animate-float" />
+        <div className="absolute -bottom-16 left-1/3 w-72 h-72 rounded-full bg-sky-500/10 blur-[120px] animate-pulse-ring" />
       </div>
 
-      <header className="relative z-10 border-b border-white/60 backdrop-blur-xl bg-white/70">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-sky-600 to-cyan-500 flex items-center justify-center shadow-sm">
-              <Mic size={17} className="text-white" />
-            </div>
-            <div>
-              <p className="font-extrabold tracking-tight text-slate-900">VoiceScript Studio</p>
-              <p className="text-[11px] text-slate-500">Smart audio and video transcription pipeline</p>
-            </div>
+      {/* Sidebar Navigation */}
+      <aside className="relative z-20 w-full lg:w-80 border-r border-white/60 backdrop-blur-xl bg-white/60 shadow-glass flex flex-col lg:h-full flex-shrink-0">
+        <div className="p-5 border-b border-white/60 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-white border border-white/80 flex items-center justify-center shadow-sm">
+            <Mic size={17} className="text-slate-900" />
           </div>
-          <div className="hidden md:flex items-center gap-2 text-xs text-slate-500">
-            <Sparkles size={12} className="text-cyan-500" />
-            Source detection, extraction, transcription, translation
+          <div>
+            <p className="font-extrabold tracking-tight text-slate-900">VoiceScript Studio</p>
+            <p className="text-[11px] text-slate-500">Smart audio dashboard</p>
           </div>
         </div>
-      </header>
 
-      <main className="relative z-10 max-w-7xl mx-auto px-4 py-6 md:py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-[35%_65%] gap-6">
-          <aside className="space-y-5">
-            <section className="card p-5 space-y-4">
+        <div className="p-5 border-b border-white/60">
+          <LanguageSelector
+            sourceLang={sourceLang}
+            targetLang={targetLang}
+            onSourceChange={setSourceLang}
+            onTargetChange={setTargetLang}
+            disabled={busy}
+          />
+        </div>
+
+        <div className="flex-1 p-5 overflow-y-auto scrollbar-thin">
+          <History
+            items={history}
+            onSelect={(item) => {
+              setOriginal(item.original)
+              setTranslation(item.translation)
+              if (item.sourceLabel) {
+                setSourceInfo((prev) => ({ ...(prev || {}), label: item.sourceLabel }))
+              }
+            }}
+            onClear={() => setHistory([])}
+          />
+        </div>
+      </aside>
+
+      {/* Main Content Dashboard */}
+      <main className="relative z-10 flex-1 h-full overflow-y-auto scrollbar-thin flex flex-col">
+        <header className="h-16 border-b border-white/60 backdrop-blur-md bg-white/40 flex items-center justify-between px-6 flex-shrink-0 hidden lg:flex">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Sparkles size={12} className="text-indigo-600" />
+            Source detection, extraction, transcription, translation
+          </div>
+          <div className="flex items-center gap-2">
+            {(error || hasOutput) && lastBlob && !busy ? (
+              <button onClick={handleRetry} className="btn-ghost py-1.5 px-3 text-xs">
+                <RefreshCw size={12} /> Retry
+              </button>
+            ) : null}
+            <button onClick={resetAll} disabled={busy} className="btn-ghost py-1.5 px-3 text-xs">
+              <RotateCcw size={12} /> Reset
+            </button>
+          </div>
+        </header>
+
+        {/* Dashboard Grid Container */}
+        <div className="p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 w-full max-w-7xl mx-auto">
+          
+          {/* Top Control Panel: Uploader & Input (Full Width) */}
+          <section className="glass-panel p-5 xl:col-span-12 flex flex-col lg:flex-row gap-6 items-stretch">
+            {/* Input Area */}
+            <div className="flex-1 w-full space-y-4 flex flex-col justify-center">
               <div>
-                <h1 className="text-2xl font-black tracking-tight text-slate-900">
-                  Intelligent Input Pipeline
-                </h1>
-                <p className="text-sm text-slate-500 mt-1">
-                  Paste Google Drive, YouTube, or direct audio links and we route processing automatically.
-                </p>
+                <h1 className="text-2xl font-black tracking-tight text-slate-900">Input Pipeline</h1>
+                <p className="text-sm text-slate-500 mt-1">Paste a link or upload an audio file to begin.</p>
               </div>
-
-              <LanguageSelector
-                sourceLang={sourceLang}
-                targetLang={targetLang}
-                onSourceChange={setSourceLang}
-                onTargetChange={setTargetLang}
-                disabled={busy}
-              />
 
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">
@@ -877,60 +908,56 @@ export default function App() {
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1 min-w-0">
-                    <Link2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-500" />
+                    <Link2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-600" />
                     <input
                       value={sourceInput}
                       onChange={(e) => setSourceInput(e.target.value)}
                       disabled={busy}
                       placeholder="Paste Google Drive, YouTube, or direct audio link"
-                      className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent disabled:opacity-60"
+                      className="w-full rounded-xl border border-white/80 bg-white/80 pl-9 pr-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent disabled:opacity-60"
                     />
                   </div>
-                  <button
-                    onClick={fetchAudioFromInput}
-                    disabled={busy || !sourceInput.trim()}
-                    className="btn-brand px-4 py-2.5 text-xs"
-                  >
+                  <button onClick={fetchAudioFromInput} disabled={busy || !sourceInput.trim()} className="btn-brand px-4 py-2.5 text-xs">
                     {ingesting ? <Loader2 size={14} className="animate-spin" /> : null}
                     {ingesting ? 'Working' : 'Process'}
                   </button>
                 </div>
+                {sourceStatusMessage ? <p className="text-xs text-slate-500 mt-2">{sourceStatusMessage}</p> : null}
               </div>
+            </div>
 
-              <Uploader
-                key={uploaderKey}
-                onAudioReady={handleAudioUpload}
-                disabled={busy}
-                selectedFile={selectedFileForUploader}
-                onClearSelected={clearSelectedAudio}
-              />
+            {/* Separator */}
+            <div className="hidden lg:block w-px bg-white/10"></div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={handleTranscript} disabled={busy || !lastBlob} className="w-full btn-ghost py-2.5 text-sm justify-center">
-                  Transcript
+            {/* Uploader */}
+            <div className="flex-1 w-full flex items-center justify-center">
+              <div className="w-full max-w-sm">
+                <Uploader key={uploaderKey} onAudioReady={handleAudioUpload} disabled={busy} selectedFile={selectedFileForUploader} onClearSelected={clearSelectedAudio} />
+              </div>
+            </div>
+          </section>
+
+          {/* Action & Status Widget (4 Cols) */}
+          <section className="xl:col-span-4 flex flex-col gap-6">
+            <div className="glass-panel p-5 space-y-4">
+              <div className="flex flex-col gap-3">
+                <button onClick={handleTranscript} disabled={busy || !lastBlob} className="w-full btn-ghost py-3 text-sm justify-center">
+                  <FileText size={16} /> Run Transcript
                 </button>
-                <button
-                  onClick={handleTranslate}
-                  disabled={busy || (!lastBlob && !(original || '').trim())}
-                  className="w-full btn-brand py-2.5 text-sm justify-center"
-                >
-                  Translate
+                <button onClick={handleTranslate} disabled={busy || (!lastBlob && !(original || '').trim())} className="w-full btn-brand py-3 text-sm justify-center">
+                  <Languages size={16} /> Run Translate
                 </button>
               </div>
 
               {sourceInfo ? (
-                <div className="rounded-xl border border-cyan-100 bg-cyan-50/60 px-3 py-2">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-700">Detected Source</p>
-                  <p className="text-sm font-semibold text-cyan-800 mt-0.5">{sourceInfo.label || 'Unknown'}</p>
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 mt-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Detected Source</p>
+                  <p className="text-sm font-semibold text-indigo-600 mt-0.5">{sourceInfo.label || 'Unknown'}</p>
                 </div>
               ) : null}
+            </div>
 
-              {sourceStatusMessage ? (
-                <p className="text-xs text-slate-500">{sourceStatusMessage}</p>
-              ) : null}
-            </section>
-
-            <section className="card p-4 space-y-2">
+            <div className="glass-panel p-5 space-y-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Pipeline Status</p>
               {PIPELINE_STEPS.map((step, index) => {
                 const stepNum = index + 1
@@ -938,61 +965,29 @@ export default function App() {
                 const done = rank > stepNum || (!busy && rank === stepNum && pipelineStep !== 'error')
                 const active = rank === stepNum && busy
                 return (
-                  <div key={step.id} className="flex items-center gap-2 text-xs">
-                    {done ? <CheckCircle2 size={13} className="text-green-500" /> : null}
-                    {active ? <Loader2 size={13} className="text-cyan-600 animate-spin" /> : null}
-                    {!done && !active ? <Circle size={13} className="text-slate-300" /> : null}
-                    <span className={done ? 'text-green-700' : active ? 'text-cyan-700 font-semibold' : 'text-slate-400'}>
+                  <div key={step.id} className="flex items-center gap-3 text-sm">
+                    {done ? <CheckCircle2 size={16} className="text-green-500" /> : null}
+                    {active ? <Loader2 size={16} className="text-indigo-600 animate-spin" /> : null}
+                    {!done && !active ? <Circle size={16} className="text-slate-400" /> : null}
+                    <span className={done ? 'text-green-400' : active ? 'text-indigo-600 font-semibold' : 'text-slate-500'}>
                       {step.label}
                     </span>
                   </div>
                 )
               })}
-            </section>
+            </div>
+          </section>
 
-            <History
-              items={history}
-              onSelect={(item) => {
-                setOriginal(item.original)
-                setTranslation(item.translation)
-                if (item.sourceLabel) {
-                  setSourceInfo((prev) => ({ ...(prev || {}), label: item.sourceLabel }))
-                }
-              }}
-              onClear={() => setHistory([])}
-            />
-          </aside>
-
-          <section className="space-y-4">
-            {(hasOutput || busy || error || hasExportableData) ? (
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Output & Export</p>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  {hasExportableData && !busy ? (
-                    <>
-                      <button onClick={() => exportData('txt', 'both')} className="btn-ghost py-1.5 px-3 text-xs">
-                        <Download size={12} /> Both TXT
-                      </button>
-                      <button onClick={() => exportData('doc', 'both')} className="btn-ghost py-1.5 px-3 text-xs">
-                        <Download size={12} /> Both DOC
-                      </button>
-                      <button onClick={() => exportData('pdf', 'both')} className="btn-ghost py-1.5 px-3 text-xs">
-                        <Download size={12} /> Both PDF
-                      </button>
-                      <button onClick={() => exportData('json', 'both')} className="btn-ghost py-1.5 px-3 text-xs">
-                        <Download size={12} /> Both JSON
-                      </button>
-                    </>
-                  ) : null}
-                  {(error || hasOutput) && lastBlob && !busy ? (
-                    <button onClick={handleRetry} className="btn-ghost py-1.5 px-3 text-xs">
-                      <RefreshCw size={12} /> Retry
-                    </button>
-                  ) : null}
-                  <button onClick={resetAll} disabled={busy} className="btn-ghost py-1.5 px-3 text-xs">
-                    <RotateCcw size={12} /> Reset
-                  </button>
-                </div>
+          {/* Transcript Panel Widget (8 Cols) */}
+          <section className="xl:col-span-8 flex flex-col gap-4">
+            {(hasOutput || hasExportableData) && !busy ? (
+              <div className="flex items-center justify-between glass-panel px-5 py-3">
+                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Export Results</p>
+                 <div className="flex gap-2">
+                    <button onClick={() => exportData('txt', 'both')} className="btn-ghost py-1 px-2.5 text-xs"><Download size={12} /> TXT</button>
+                    <button onClick={() => exportData('doc', 'both')} className="btn-ghost py-1 px-2.5 text-xs"><Download size={12} /> DOC</button>
+                    <button onClick={() => exportData('pdf', 'both')} className="btn-ghost py-1 px-2.5 text-xs"><Download size={12} /> PDF</button>
+                 </div>
               </div>
             ) : null}
 
@@ -1000,11 +995,11 @@ export default function App() {
               <div className="rounded-2xl border border-red-200 bg-red-50 p-5 shadow-sm animate-scale-in">
                 <div className="flex items-start gap-3">
                   <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
-                    <AlertCircle size={18} className="text-red-600" />
+                    <AlertCircle size={18} className="text-red-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-sm text-red-700">Processing error</p>
-                    <p className="text-sm text-red-600 mt-1 leading-relaxed">{error}</p>
+                    <p className="font-bold text-sm text-red-400">Processing error</p>
+                    <p className="text-sm text-red-400 mt-1 leading-relaxed">{error}</p>
                   </div>
                 </div>
               </div>
@@ -1022,6 +1017,7 @@ export default function App() {
               onExportTranslation={(format) => exportData(format, 'translation')}
             />
           </section>
+
         </div>
       </main>
     </div>
