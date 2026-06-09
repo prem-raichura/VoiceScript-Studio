@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/render-oss/render-schema/master/render.yaml.json
 services:
   # ── Backend Web Service (Docker) ──
   - type: web
@@ -13,17 +14,4 @@ services:
       - key: GROQ_API_KEY
         sync: false # You will set this securely in the Render dashboard
 
-  # ── Frontend Static Site ──
-  - type: web
-    name: voicescript-frontend
-    env: static
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
-    envVars:
-      # Automatically points the frontend to the backend's Render URL!
-      - key: VITE_API_BASE_URL
-        fromService:
-          type: web
-          name: voicescript-backend
-          envVarKey: RENDER_EXTERNAL_URL
+
