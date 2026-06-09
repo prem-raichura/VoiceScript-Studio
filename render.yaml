@@ -1,0 +1,29 @@
+services:
+  # ── Backend Web Service (Docker) ──
+  - type: web
+    name: voicescript-backend
+    env: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: free # Change this if you need more resources
+    healthCheckPath: /health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        sync: false # You will set this to your frontend URL in the Render dashboard later
+      - key: GROQ_API_KEY
+        sync: false # You will set this securely in the Render dashboard
+
+  # ── Frontend Static Site ──
+  - type: web
+    name: voicescript-frontend
+    env: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      # Automatically points the frontend to the backend's Render URL!
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: voicescript-backend
+          envVarKey: RENDER_EXTERNAL_URL

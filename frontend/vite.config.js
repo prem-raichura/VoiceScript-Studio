@@ -12,31 +12,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
-        '/detect-source': {
-          target: apiUrl,
-          changeOrigin: true,
-        },
-        '/transcribe': {
-          target: apiUrl,
-          changeOrigin: true,
-        },
-        '/transcribe-chunk': {
-          target: apiUrl,
-          changeOrigin: true,
-        },
-        '/transcribe-large': {
-          target: apiUrl,
-          changeOrigin: true,
-        },
-        '/extract-audio-url': {
-          target: apiUrl,
-          changeOrigin: true,
-        },
-        '/translate-text': {
-          target: apiUrl,
-          changeOrigin: true,
-        },
-        '/health': {
+        '/api': {
           target: apiUrl,
           changeOrigin: true,
         },
