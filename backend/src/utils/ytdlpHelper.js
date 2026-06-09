@@ -93,7 +93,7 @@ async function runYtDlp(urlStr, args = []) {
     }
 
     // append default opts
-    finalArgs.push("--quiet", "--no-warnings", "--noplaylist");
+    finalArgs.push("--quiet", "--no-warnings", "--no-playlist");
 
     const proc = spawn("yt-dlp", [...finalArgs, urlStr]);
     let stdout = "";
@@ -199,7 +199,7 @@ async function downloadVideoFile(urlStr, outputDir, setProgress) {
       const args = [
         "-f", fmt,
         "-o", outputTemplate,
-        "--quiet", "--no-warnings", "--noplaylist",
+        "--quiet", "--no-warnings", "--no-playlist",
         "--extractor-args", `youtube:player_client=${clients}`,
         "--print", "%(title)s|%(filepath)s"
       ];
