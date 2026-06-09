@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
+import { Toaster, toast } from 'react-hot-toast'
 import {
   AlertCircle,
   CheckCircle2,
@@ -79,6 +80,7 @@ function triggerDownload(blob, filename) {
   anchor.click()
   document.body.removeChild(anchor)
   URL.revokeObjectURL(url)
+  toast.success(`Exported ${filename}`)
 }
 
 function parseDispositionFilename(headerValue) {
@@ -836,6 +838,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen lg:h-screen w-full bg-transparent relative overflow-hidden text-slate-800 flex flex-col lg:flex-row">
+      <Toaster position="top-right" />
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         <div className="absolute -top-24 -left-24 w-80 h-80 rounded-full bg-indigo-500/10 blur-[120px] animate-pulse-ring" />
         <div className="absolute top-1/3 -right-16 w-72 h-72 rounded-full bg-violet-500/10 blur-[100px] animate-float" />
