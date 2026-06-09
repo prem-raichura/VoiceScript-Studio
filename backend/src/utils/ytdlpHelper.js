@@ -174,12 +174,13 @@ async function detectSource(urlStr) {
 async function downloadVideoFile(urlStr, outputDir, setProgress) {
   const outputTemplate = path.join(outputDir, "source.%(ext)s");
   const formatChain = [
+    "ba/b",
     "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
-    "best[height<=480]",
     "best"
   ];
 
   const clientRounds = [
+    "default",
     YOUTUBE_PLAYER_CLIENTS.join(","),
     "web",
     "mweb"
@@ -199,10 +200,12 @@ async function downloadVideoFile(urlStr, outputDir, setProgress) {
       const args = [
         "-f", fmt,
         "-o", outputTemplate,
-        "--quiet", "--no-warnings", "--no-playlist",
-        "--extractor-args", `youtube:player_client=${clients}`,
-        "--print", "%(title)s|%(filepath)s"
+        "--no-warnings", "--no-playlist", "--newline",
+        "--print", "FINAL_INFO:%(title)s|%(filepath)s"
       ];
+      if (clients !== "default") {
+        args.push("--extractor-args", `youtube:player_client=${clients}`);
+      }
       
       if (cookieData.path) {
         args.push("--cookies", cookieData.path);
@@ -215,7 +218,15 @@ async function downloadVideoFile(urlStr, outputDir, setProgress) {
         let stdout = "";
         let stderr = "";
 
-        proc.stdout.on("data", d => stdout += d.toString());
+        proc.stdout.on("data", d => {
+          const text = d.toString();
+          stdout += text;
+          // Extract percentage like: [download]  15.5% of ...
+          const match = text.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+          if (match) {
+            setProgress(`Downloading: ${match[1]}%`);
+          }
+        });
         proc.stderr.on("data", d => stderr += d.toString());
 
         await new Promise((resolve, reject) => {
@@ -233,8 +244,13 @@ async function downloadVideoFile(urlStr, outputDir, setProgress) {
         });
 
         // Try to parse out the title and path from print
-        const parts = stdout.trim().split("|");
-        const title = parts.length > 0 ? parts[0] : "video-audio";
+        let title = "video-audio";
+        for (const line of stdout.split("\n")) {
+          if (line.includes("FINAL_INFO:")) {
+            const parts = line.split("FINAL_INFO:")[1].trim().split("|");
+            if (parts.length > 0) title = parts[0];
+          }
+        }
         
         let dlPath = null;
         fs.readdirSync(outputDir).forEach(file => {
