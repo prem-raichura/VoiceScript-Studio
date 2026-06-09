@@ -174,6 +174,7 @@ async function detectSource(urlStr) {
 async function downloadVideoFile(urlStr, outputDir, setProgress) {
   const outputTemplate = path.join(outputDir, "source.%(ext)s");
   const formatChain = [
+    "default",
     "ba/b",
     "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
     "best"
@@ -198,11 +199,13 @@ async function downloadVideoFile(urlStr, outputDir, setProgress) {
 
       const cookieData = getTempCookieFile();
       const args = [
-        "-f", fmt,
         "-o", outputTemplate,
         "--no-warnings", "--no-playlist", "--newline",
         "--print", "FINAL_INFO:%(title)s|%(filepath)s"
       ];
+      if (fmt !== "default") {
+        args.push("-f", fmt);
+      }
       if (clients !== "default") {
         args.push("--extractor-args", `youtube:player_client=${clients}`);
       }
