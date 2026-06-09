@@ -40,7 +40,8 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
-app.use("/api/", apiLimiter);
+
+// We DO NOT apply it globally because it breaks the /status polling endpoint.
 
 // Increase max payload size
 app.use(express.json({ limit: "50mb" }));
@@ -53,16 +54,16 @@ app.get("/health", healthController.health);
 // API Routes
 const apiRouter = express.Router();
 
-apiRouter.post("/detect-source", youtubeController.detectSourceRoute);
-apiRouter.post("/extract-audio-url", youtubeController.extractAudioUrl);
+apiRouter.post("/detect-source", apiLimiter, youtubeController.detectSourceRoute);
+apiRouter.post("/extract-audio-url", apiLimiter, youtubeController.extractAudioUrl);
 apiRouter.get("/extract-audio-url/status/:job_id", youtubeController.extractAudioUrlStatus);
 apiRouter.get("/extract-audio-url/download/:job_id", youtubeController.extractAudioUrlDownload);
 
-apiRouter.post("/transcribe", transcribeController.transcribe);
-apiRouter.post("/transcribe-chunk", transcribeController.transcribeChunk);
-apiRouter.post("/transcribe-large", transcribeController.transcribeLarge);
+apiRouter.post("/transcribe", apiLimiter, transcribeController.transcribe);
+apiRouter.post("/transcribe-chunk", apiLimiter, transcribeController.transcribeChunk);
+apiRouter.post("/transcribe-large", apiLimiter, transcribeController.transcribeLarge);
 
-apiRouter.post("/translate-text", translateController.translateText);
+apiRouter.post("/translate-text", apiLimiter, translateController.translateText);
 
 app.use("/api", apiRouter);
 
