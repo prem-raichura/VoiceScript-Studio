@@ -1,68 +1,50 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, X, CheckCircle2, AlertCircle, Cloud, Loader2 } from 'lucide-react'
+import { Upload, X, CheckCircle2, AlertCircle, Server, Loader2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 
 const MAX_MB = 1228
-const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
-const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
-const USE_CLOUDINARY = Boolean(CLOUDINARY_CLOUD_NAME && CLOUDINARY_UPLOAD_PRESET)
+const CHUNK_SIZE = 4 * 1024 * 1024 // 4 MB per chunk
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 /**
- * Uploads a file to Cloudinary using their chunked upload API.
- * Sends 6 MB slices with Content-Range + X-Unique-Upload-Id headers.
- * Each chunk is way under any preset limit — no 413 errors.
- * Works for files of any size on the free tier.
+ * Uploads a file to the Render backend in 4 MB chunks.
+ * 1. POST /api/upload-init   → gets session_id (also wakes Render)
+ * 2. POST /api/upload-chunk  × N  → sends each 4 MB slice
+ * Returns session_id on success.
  */
-async function uploadToCloudinary(file, onProgress) {
-  const CHUNK_SIZE = 6 * 1024 * 1024 // 6 MB per chunk
-  const totalSize = file.size
-  const uniqueId = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
-  const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/video/upload`
+async function uploadToServer(file, onProgress) {
+  // Step 1 — init session (wakes Render if sleeping)
+  const initRes = await fetch(`${API_BASE}/api/upload-init`, { method: 'POST' })
+  if (!initRes.ok) throw new Error(`Server init failed (${initRes.status})`)
+  const { session_id } = await initRes.json()
 
-  console.log('[Cloudinary] Chunked upload →', endpoint)
-  console.log('[Cloudinary] Preset:', CLOUDINARY_UPLOAD_PRESET, '| File:', file.name, `(${(totalSize / 1024 / 1024).toFixed(1)} MB)`)
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+  console.log(`[upload] session=${session_id} chunks=${totalChunks} file=${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`)
 
-  let start = 0
-  let secureUrl = null
-
-  while (start < totalSize) {
-    const end = Math.min(start + CHUNK_SIZE, totalSize)
+  // Step 2 — upload chunks sequentially
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE
+    const end = Math.min(start + CHUNK_SIZE, file.size)
     const chunk = file.slice(start, end)
 
     const fd = new FormData()
-    fd.append('file', chunk, file.name)
-    fd.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
+    fd.append('session_id', session_id)
+    fd.append('chunk_index', String(i))
+    fd.append('total_chunks', String(totalChunks))
+    fd.append('chunk', chunk, file.name)
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'X-Unique-Upload-Id': uniqueId,
-        'Content-Range': `bytes ${start}-${end - 1}/${totalSize}`,
-      },
-      body: fd,
-    })
-
-    let body = {}
-    try { body = await res.json() } catch { /* ignore */ }
-
+    const res = await fetch(`${API_BASE}/api/upload-chunk`, { method: 'POST', body: fd })
     if (!res.ok) {
-      const msg = body?.error?.message || `Cloudinary error ${res.status}`
-      console.error('[Cloudinary] Chunk error:', res.status, body)
-      throw new Error(msg)
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || `Chunk ${i + 1} upload failed (${res.status})`)
     }
 
-    // Cloudinary returns secure_url only on the final chunk
-    if (body.secure_url) secureUrl = body.secure_url
-
-    onProgress(Math.round((end / totalSize) * 100))
-    start = end
+    onProgress(Math.round(((i + 1) / totalChunks) * 100))
+    console.log(`[upload] chunk ${i + 1}/${totalChunks} done`)
   }
 
-  if (!secureUrl) throw new Error('Cloudinary upload completed but no URL returned')
-  console.log('[Cloudinary] Upload complete:', secureUrl)
-  return secureUrl
+  return session_id
 }
-
 
 export default function Uploader({ onAudioReady, disabled, selectedFile, onClearSelected }) {
   const inputRef = useRef()
@@ -71,6 +53,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadStatus, setUploadStatus] = useState('')
 
   useEffect(() => {
     setFile(selectedFile || null)
@@ -87,27 +70,30 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
     if (err) { setError(err); return }
     setError('')
     setFile(f)
+    setUploading(true)
+    setUploadProgress(0)
+    setUploadStatus('Connecting to server…')
 
-    // ── Cloudinary upload path (production on Render) ─────────────────────────
-    if (USE_CLOUDINARY) {
-      setUploading(true)
+    try {
+      const sessionId = await uploadToServer(f, (pct) => {
+        setUploadProgress(pct)
+        setUploadStatus(`Uploading… ${pct}%`)
+      })
+      setUploading(false)
+      setUploadStatus('')
+      toast.success(`File uploaded — ready to process!`)
+      // Pass session:// ref as the cloudinary URL slot — App.jsx routes accordingly
+      onAudioReady(f, f.name, `session://${sessionId}`)
+    } catch (e) {
+      setUploading(false)
+      setUploadStatus('')
+      setFile(null)
       setUploadProgress(0)
-      try {
-        const cloudUrl = await uploadToCloudinary(f, setUploadProgress)
-        setUploading(false)
-        toast.success('File uploaded to cloud — ready to process!')
-        onAudioReady(f, f.name, cloudUrl)
-      } catch (e) {
-        setUploading(false)
-        setError(e.message || 'Cloud upload failed. Try again.')
-        toast.error(e.message?.slice(0, 80) || 'Cloud upload failed.')
-        setFile(null)
-      }
-      return
+      const msg = e.message || 'Upload failed. Try again.'
+      setError(msg)
+      toast.error(msg.slice(0, 80))
+      console.error('[upload] failed:', e)
     }
-
-    // ── Direct path (local dev, no Cloudinary configured) ─────────────────────
-    onAudioReady(f, f.name, null)
   }
 
   function onDrop(e) {
@@ -122,6 +108,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
     setError('')
     setUploading(false)
     setUploadProgress(0)
+    setUploadStatus('')
     if (onClearSelected) onClearSelected()
   }
 
@@ -149,17 +136,19 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
         {uploading ? (
           <>
             <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center">
-              <Cloud size={26} className="text-indigo-500 animate-pulse" />
+              <Server size={26} className="text-indigo-500 animate-pulse" />
             </div>
-            <div className="animate-fade-in space-y-2 w-full max-w-[200px]">
-              <p className="font-semibold text-sm text-slate-800">Uploading to cloud…</p>
+            <div className="animate-fade-in space-y-2 w-full max-w-[220px]">
+              <p className="font-semibold text-sm text-slate-800">{uploadStatus}</p>
               <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                 <div
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-200"
+                  className="h-full bg-indigo-500 rounded-full transition-all duration-300"
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
-              <p className="text-xs text-slate-500">{uploadProgress}%</p>
+              <p className="text-xs text-slate-500">
+                {file ? `${formatSize(Math.round(file.size * uploadProgress / 100))} / ${formatSize(file.size)}` : ''}
+              </p>
             </div>
           </>
         ) : file ? (
@@ -171,9 +160,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
             </div>
             <div className="animate-fade-in space-y-1">
               <p className="font-semibold text-sm text-slate-800 truncate max-w-[200px]">{file.name}</p>
-              <p className="text-xs text-slate-500">
-                {formatSize(file.size)} {USE_CLOUDINARY ? '· Uploaded to cloud ☁️' : '· Ready to process'}
-              </p>
+              <p className="text-xs text-slate-500">{formatSize(file.size)} · Ready to process</p>
             </div>
             <button
               onClick={clear}
@@ -196,11 +183,6 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
                 {dragging ? 'Drop your audio file here' : 'Drag & drop or click to upload'}
               </p>
               <p className="text-xs text-slate-500 mt-1.5">MP3, WAV, M4A, OGG, WebM · up to 1.2 GB</p>
-              {USE_CLOUDINARY && (
-                <p className="text-[10px] text-indigo-400 mt-1 flex items-center justify-center gap-1">
-                  <Cloud size={10} /> Uploaded securely via Cloudinary
-                </p>
-              )}
             </div>
           </>
         )}

@@ -424,16 +424,27 @@ export default function App() {
     let finalTranslation = ''
 
     try {
-      const res = await fetch(`${API_BASE}/api/transcribe-url`, {
+      // session:// → uploaded via chunked upload to Render (/api/transcribe-session)
+      // https://  → Cloudinary or any HTTPS URL (/api/transcribe-url)
+      const isSession = cloudinaryUrl?.startsWith('session://')
+      const sessionId = isSession ? cloudinaryUrl.replace('session://', '') : null
+
+      const endpoint = isSession ? `${API_BASE}/api/transcribe-session` : `${API_BASE}/api/transcribe-url`
+      const body = isSession
+        ? { session_id: sessionId, filename: lastFilename, source_lang: sourceLang, target_lang: targetLang, action }
+        : { url: cloudinaryUrl, source_lang: sourceLang, target_lang: targetLang, action }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: cloudinaryUrl, source_lang: sourceLang, target_lang: targetLang, action }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       })
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}))
         throw new Error(payload.error || `Server error (${res.status})`)
       }
+
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()

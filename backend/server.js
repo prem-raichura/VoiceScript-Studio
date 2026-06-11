@@ -11,6 +11,7 @@ const healthController = require("./src/controllers/healthController");
 const transcribeController = require("./src/controllers/transcribeController");
 const translateController = require("./src/controllers/translateController");
 const youtubeController = require("./src/controllers/youtubeController");
+const uploadController = require("./src/controllers/uploadController");
 
 const app = express();
 
@@ -63,6 +64,11 @@ apiRouter.post("/transcribe", apiLimiter, transcribeController.transcribe);
 apiRouter.post("/transcribe-chunk", apiLimiter, transcribeController.transcribeChunk);
 apiRouter.post("/transcribe-large", apiLimiter, transcribeController.transcribeLarge);
 apiRouter.post("/transcribe-url", apiLimiter, transcribeController.transcribeFromUrl);
+apiRouter.post("/transcribe-session", apiLimiter, transcribeController.transcribeSession);
+
+// Chunked file upload routes (no Cloudinary needed)
+apiRouter.post("/upload-init", apiLimiter, uploadController.initSession);
+apiRouter.post("/upload-chunk", uploadController.uploadChunk); // No rate limit — called many times per file
 
 apiRouter.post("/translate-text", apiLimiter, translateController.translateText);
 
