@@ -388,12 +388,20 @@ export default function App() {
             setPipeline('output', 'Output Generated')
             setLoading(false)
             setStatus('')
-            if (finalOriginal || finalTranslation) appendHistory(finalOriginal, finalTranslation)
+            if (finalOriginal || finalTranslation) {
+              appendHistory(finalOriginal, finalTranslation)
+              if (action === 'transcript') {
+                toast.success('Transcription complete!')
+              } else {
+                toast.success('Transcription & translation complete!')
+              }
+            }
           }
         }
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
+        toast.error(err.message?.slice(0, 80) || 'Something went wrong.')
         setError(err.message || 'Something went wrong.')
         setLoading(false)
         setPipelineStep('error')
@@ -487,7 +495,10 @@ export default function App() {
             setPipeline('output', 'Output Generated')
             setLoading(false)
             setStatus('')
-            if (finalOriginalText) appendHistory(finalOriginalText, '')
+            if (finalOriginalText) {
+              appendHistory(finalOriginalText, '')
+              toast.success('Large-file transcription complete!')
+            }
           }
         }
       }
@@ -499,6 +510,7 @@ export default function App() {
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
+        toast.error(err.message?.slice(0, 80) || 'Large-file transcription failed.')
         setError(err.message || 'Large-file transcription failed.')
         setLoading(false)
         setPipelineStep('error')
@@ -563,7 +575,10 @@ export default function App() {
             setPipeline('output', 'Output Generated')
             setLoading(false)
             setStatus('')
-            if (inputText || finalTranslation) appendHistory(inputText, finalTranslation)
+            if (inputText || finalTranslation) {
+              appendHistory(inputText, finalTranslation)
+              toast.success('Translation complete!')
+            }
           }
         }
       }
@@ -574,6 +589,7 @@ export default function App() {
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
+        toast.error(err.message?.slice(0, 80) || 'Translation failed.')
         setError(err.message || 'Translation failed.')
         setLoading(false)
         setPipelineStep('error')
@@ -614,6 +630,7 @@ export default function App() {
       const label = detected.label || SOURCE_BADGES[detected.source_type] || 'Detected Source'
       setSourceInfo({ ...detected, label })
       setSourceStatusMessage(`Detected: ${label}`)
+      toast.success(`Source detected: ${label}`, { duration: 2000 })
 
       if (detected.requires_extraction) {
         setPipeline('extract', 'Extracting Audio...')
@@ -672,8 +689,10 @@ export default function App() {
       setLastFilename(filename)
       setPipeline('transcribe', 'Ready to Transcribe')
       setSourceStatusMessage(`Audio ready: ${filename}`)
+      toast.success('Audio extracted — ready to transcribe!')
     } catch (err) {
       if (err.name === 'AbortError') return
+      toast.error(err.message?.slice(0, 80) || 'Source processing failed.')
       setError(err.message || 'Source processing failed.')
       setPipelineStep('error')
       setSourceStatusMessage(err.message || 'Failed')
@@ -694,6 +713,7 @@ export default function App() {
     })
     setPipeline('transcribe', 'Ready to Transcribe')
     setSourceStatusMessage(`Audio selected: ${filename}`)
+    toast.success(`File loaded: ${filename}`, { duration: 2000 })
   }, [])
 
   const clearSelectedAudio = useCallback(() => {
@@ -838,7 +858,39 @@ export default function App() {
 
   return (
     <div className="min-h-screen lg:h-screen w-full bg-transparent relative overflow-hidden text-slate-800 flex flex-col lg:flex-row">
-      <Toaster position="top-right" />
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          style: {
+            borderRadius: '12px',
+            background: 'rgba(255,255,255,0.95)',
+            backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255,255,255,0.8)',
+            boxShadow: '0 8px 32px rgba(15,23,42,0.08)',
+            color: '#0f172a',
+            fontSize: '13px',
+            fontWeight: '500',
+            maxWidth: '360px',
+          },
+          success: {
+            iconTheme: { primary: '#22c55e', secondary: '#ffffff' },
+            duration: 3000,
+          },
+          error: {
+            iconTheme: { primary: '#ef4444', secondary: '#ffffff' },
+            duration: 5000,
+            style: {
+              borderRadius: '12px',
+              background: 'rgba(255,245,245,0.97)',
+              border: '1px solid rgba(239,68,68,0.15)',
+              color: '#dc2626',
+              fontSize: '13px',
+              fontWeight: '500',
+              maxWidth: '360px',
+            },
+          },
+        }}
+      />
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         <div className="absolute -top-24 -left-24 w-80 h-80 rounded-full bg-indigo-500/10 blur-[120px] animate-pulse-ring" />
         <div className="absolute top-1/3 -right-16 w-72 h-72 rounded-full bg-violet-500/10 blur-[100px] animate-float" />
