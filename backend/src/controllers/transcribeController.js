@@ -280,3 +280,169 @@ exports.transcribeLarge = (req, res) => {
   req.pipe(busboy);
 };
 
+// ─── Download helper ──────────────────────────────────────────────────────────
+
+function downloadFromUrl(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const https = require("https");
+    const http  = require("http");
+    const client = url.startsWith("https") ? https : http;
+
+    const file = fs.createWriteStream(destPath);
+
+    const req = client.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        file.close();
+        fs.unlink(destPath, () => {});
+        return downloadFromUrl(res.headers.location, destPath).then(resolve).catch(reject);
+      }
+      if (res.statusCode >= 400) {
+        file.close();
+        fs.unlink(destPath, () => {});
+        return reject(new Error(`HTTP ${res.statusCode} while downloading audio`));
+      }
+      res.pipe(file);
+      file.on("finish", () => file.close(resolve));
+      file.on("error", (e) => { fs.unlink(destPath, () => {}); reject(e); });
+    });
+
+    req.on("error", (e) => { fs.unlink(destPath, () => {}); reject(e); });
+    req.on("timeout", () => { req.destroy(); reject(new Error("Download timed out")); });
+  });
+}
+
+// ─── Transcribe from URL (Cloudinary or any HTTPS audio link) ─────────────────
+
+exports.transcribeFromUrl = async (req, res) => {
+  const { url, source_lang = "auto", target_lang = "en", action = "translate" } = req.body;
+
+  if (!url) return res.status(400).json({ error: "url is required" });
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "url_transcribe_"));
+
+  try {
+    // Guess extension from URL (Cloudinary keeps the original extension)
+    const rawExt = path.extname(new URL(url).pathname).replace(".", "").toLowerCase();
+    const ext = rawExt || "mp3";
+    const inputPath = path.join(tempDir, `input.${ext}`);
+
+    // Download the file from Cloudinary / HTTPS
+    try {
+      await downloadFromUrl(url, inputPath);
+    } catch (e) {
+      return res.status(502).json({ error: `Failed to download audio: ${e.message}` });
+    }
+
+    const fileSize = fs.statSync(inputPath).size;
+
+    // ── Small file: transcribe directly ───────────────────────────────────────
+    if (fileSize <= WHISPER_MAX_BYTES) {
+      const buffer = fs.readFileSync(inputPath);
+      const result = await runWhisper(buffer, `input.${ext}`, `audio/${ext}`, source_lang);
+
+      sseResponse(res);
+      sendSseMessage(res, { type: "meta", duration: Math.round(result.duration * 10) / 10, detected_lang: result.detected_lang });
+      sendSseMessage(res, { type: "original", text: result.text });
+
+      if (action === "translate") {
+        await translateStream(res, result.text, target_lang);
+      } else {
+        sendSseMessage(res, { type: "done" });
+        res.end();
+      }
+      return;
+    }
+
+    // ── Large file: ffmpeg segmentation ──────────────────────────────────────
+    const ffmpegAvailable = await new Promise((resolve) => {
+      const check = spawn("ffmpeg", ["-version"]);
+      check.on("error", () => resolve(false));
+      check.on("close", (code) => resolve(code === 0));
+    });
+
+    if (!ffmpegAvailable) {
+      return res.status(413).json({
+        error: `File is ${(fileSize / 1024 / 1024).toFixed(1)} MB — exceeds Whisper's 25 MB limit. Install ffmpeg to enable segmentation.`,
+      });
+    }
+
+    const segmentsDir = path.join(tempDir, "segments");
+    fs.mkdirSync(segmentsDir, { recursive: true });
+    const segmentPattern = path.join(segmentsDir, "chunk_%05d.mp3");
+
+    const proc = spawn("ffmpeg", [
+      "-y", "-i", inputPath,
+      "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k",
+      "-f", "segment", "-segment_time", "600", "-reset_timestamps", "1",
+      segmentPattern,
+    ]);
+
+    let ffmpegErr = "";
+    proc.stderr.on("data", (d) => (ffmpegErr += d.toString()));
+    proc.on("error", (e) => {
+      if (!res.headersSent) res.status(500).json({ error: `ffmpeg error: ${e.message}` });
+    });
+
+    proc.on("close", async (code) => {
+      if (code !== 0) {
+        if (!res.headersSent) res.status(500).json({ error: `ffmpeg failed: ${ffmpegErr.slice(-300)}` });
+        return;
+      }
+
+      const segmentPaths = fs.readdirSync(segmentsDir)
+        .filter((f) => f.startsWith("chunk_") && f.endsWith(".mp3"))
+        .map((f) => path.join(segmentsDir, f))
+        .sort();
+
+      if (!segmentPaths.length) {
+        return res.status(500).json({ error: "No audio segments produced." });
+      }
+
+      sseResponse(res);
+      const total = segmentPaths.length;
+      sendSseMessage(res, { type: "progress", completed: 0, total, message: `Transcribing 0/${total} parts...` });
+
+      let completed = 0, nextIndex = 0, durationTotal = 0, detectedLang = "";
+      const ready = {};
+      const limit = pLimit(3);
+
+      const promises = segmentPaths.map((sp, i) =>
+        limit(() =>
+          transcribeSegmentFile(sp, source_lang, i).then((result) => {
+            completed++;
+            ready[result.index] = result;
+            sendSseMessage(res, { type: "progress", completed, total, message: `Transcribing ${completed}/${total} parts...` });
+
+            while (ready[nextIndex]) {
+              const r = ready[nextIndex];
+              delete ready[nextIndex];
+              if (!detectedLang && r.detected_lang) detectedLang = r.detected_lang;
+              durationTotal += r.duration;
+              sendSseMessage(res, { type: "transcript_chunk", index: nextIndex, text: r.text });
+              nextIndex++;
+            }
+          }).catch((err) => {
+            sendSseMessage(res, { type: "error", message: err.message });
+          })
+        )
+      );
+
+      try {
+        await Promise.all(promises);
+        sendSseMessage(res, { type: "meta", duration: Math.round(durationTotal * 10) / 10, detected_lang: detectedLang });
+      } catch (err) {
+        sendSseMessage(res, { type: "error", message: err.message });
+      }
+
+      sendSseMessage(res, { type: "done" });
+      res.end();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+};
+
+

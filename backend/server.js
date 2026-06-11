@@ -62,6 +62,7 @@ apiRouter.get("/extract-audio-url/download/:job_id", youtubeController.extractAu
 apiRouter.post("/transcribe", apiLimiter, transcribeController.transcribe);
 apiRouter.post("/transcribe-chunk", apiLimiter, transcribeController.transcribeChunk);
 apiRouter.post("/transcribe-large", apiLimiter, transcribeController.transcribeLarge);
+apiRouter.post("/transcribe-url", apiLimiter, transcribeController.transcribeFromUrl);
 
 apiRouter.post("/translate-text", apiLimiter, translateController.translateText);
 

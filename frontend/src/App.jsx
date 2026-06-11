@@ -265,6 +265,7 @@ export default function App() {
   const [lastBlob, setLastBlob] = useState(null)
   const [lastFilename, setLastFilename] = useState('audio.webm')
   const [lastAction, setLastAction] = useState('translate')
+  const [lastCloudinaryUrl, setLastCloudinaryUrl] = useState(null)
   const [uploaderKey, setUploaderKey] = useState(0)
 
   const [sourceInput, setSourceInput] = useState('')
@@ -308,6 +309,7 @@ export default function App() {
     setLastBlob(null)
     setLastFilename('audio.webm')
     setLastAction('translate')
+    setLastCloudinaryUrl(null)
     setUploaderKey((k) => k + 1)
     setSourceInput('')
     setSourceInfo(null)
@@ -403,6 +405,85 @@ export default function App() {
       if (err.name !== 'AbortError') {
         toast.error(err.message?.slice(0, 80) || 'Something went wrong.')
         setError(err.message || 'Something went wrong.')
+        setLoading(false)
+        setPipelineStep('error')
+      }
+    }
+  }, [appendHistory, clearResults, setPipeline, sourceLang, targetLang])
+
+  // ── URL-based transcription (used when file was uploaded to Cloudinary) ──────
+  // Sends just a URL to the backend — no large file upload to Render.
+  const runTranscribeFromUrl = useCallback(async (cloudinaryUrl, action = 'translate') => {
+    clearResults()
+    setLoading(true)
+    setPipeline('transcribe', 'Transcribing...')
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    let finalOriginal = ''
+    let finalTranslation = ''
+
+    try {
+      const res = await fetch(`${API_BASE}/api/transcribe-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: cloudinaryUrl, source_lang: sourceLang, target_lang: targetLang, action }),
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || `Server error (${res.status})`)
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          let data = null
+          try { data = JSON.parse(line.slice(6)) } catch { continue }
+
+          if (data.type === 'progress') {
+            setPipeline('transcribe', data.message || 'Transcribing...')
+          } else if (data.type === 'meta') {
+            setDuration(data.duration || 0)
+            setDetectedLang(data.detected_lang || '')
+          } else if (data.type === 'original') {
+            finalOriginal = data.text || ''
+            setOriginal(finalOriginal)
+            if (action === 'translate') setPipeline('translate', 'Translating...')
+          } else if (data.type === 'translation_chunk') {
+            if (action === 'translate') setPipeline('translate', 'Translating...')
+            finalTranslation += data.text || ''
+            setTranslation((prev) => prev + (data.text || ''))
+          } else if (data.type === 'transcript_chunk') {
+            finalOriginal += (finalOriginal ? ' ' : '') + (data.text || '')
+            setOriginal(finalOriginal)
+          } else if (data.type === 'error') {
+            throw new Error(data.message || 'Processing failed.')
+          } else if (data.type === 'done') {
+            setPipeline('output', 'Output Generated')
+            setLoading(false)
+            setStatus('')
+            if (finalOriginal || finalTranslation) {
+              appendHistory(finalOriginal, finalTranslation)
+              toast.success(action === 'transcript' ? 'Transcription complete!' : 'Transcription & translation complete!')
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        toast.error(err.message?.slice(0, 80) || 'Processing failed.')
+        setError(err.message || 'Processing failed.')
         setLoading(false)
         setPipelineStep('error')
       }
@@ -702,9 +783,10 @@ export default function App() {
     }
   }, [busy, detectSource, setPipeline, sourceInput])
 
-  const handleAudioUpload = useCallback((blob, filename = 'audio.webm') => {
+  const handleAudioUpload = useCallback((blob, filename = 'audio.webm', cloudinaryUrl = null) => {
     setLastBlob(blob)
     setLastFilename(filename)
+    setLastCloudinaryUrl(cloudinaryUrl)
     setSourceInfo({
       source_type: 'direct_audio',
       label: 'Direct Audio',
@@ -719,17 +801,23 @@ export default function App() {
   const clearSelectedAudio = useCallback(() => {
     setLastBlob(null)
     setLastFilename('audio.webm')
+    setLastCloudinaryUrl(null)
   }, [])
 
   const handleTranscript = useCallback(() => {
     if (!lastBlob || busy) return
     setLastAction('transcript')
+    // If file was uploaded to Cloudinary, use URL-based endpoint (no large upload to Render)
+    if (lastCloudinaryUrl) {
+      runTranscribeFromUrl(lastCloudinaryUrl, 'transcript')
+      return
+    }
     if (lastBlob.size > LARGE_FILE_THRESHOLD_BYTES) {
       runChunkedTranscript(lastBlob, lastFilename)
     } else {
       runTranscription(lastBlob, lastFilename, 'transcript')
     }
-  }, [busy, lastBlob, lastFilename, runChunkedTranscript, runTranscription])
+  }, [busy, lastBlob, lastCloudinaryUrl, lastFilename, runChunkedTranscript, runTranscribeFromUrl, runTranscription])
 
   const handleTranslate = useCallback(() => {
     if (busy) return
@@ -738,8 +826,13 @@ export default function App() {
       runTextTranslation(original)
       return
     }
+    // If file was uploaded to Cloudinary, use URL-based endpoint
+    if (lastCloudinaryUrl) {
+      runTranscribeFromUrl(lastCloudinaryUrl, 'translate')
+      return
+    }
     if (lastBlob) runTranscription(lastBlob, lastFilename, 'translate')
-  }, [busy, lastBlob, lastFilename, original, runTextTranslation, runTranscription])
+  }, [busy, lastBlob, lastCloudinaryUrl, lastFilename, original, runTextTranslation, runTranscribeFromUrl, runTranscription])
 
   const handleRetry = useCallback(() => {
     if (!lastBlob && !(original || '').trim()) return
