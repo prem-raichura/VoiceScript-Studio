@@ -8,44 +8,50 @@ const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 const USE_CLOUDINARY = Boolean(CLOUDINARY_CLOUD_NAME && CLOUDINARY_UPLOAD_PRESET)
 
 /**
- * Uploads a file directly from the browser to Cloudinary (unsigned).
- * Returns the secure HTTPS URL of the uploaded file.
- * onProgress(0-100) is called with upload progress.
+ * Uploads a file directly from the browser to Cloudinary (unsigned preset).
+ * Uses fetch + video/upload endpoint (audio files are classified as "video" in Cloudinary).
+ * onProgress(0-100) called via XHR for progress tracking.
  */
-function uploadToCloudinary(file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const fd = new FormData()
-    fd.append('file', file)
-    fd.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
-    // resource_type=auto lets Cloudinary accept audio, video, etc.
-    const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`
+async function uploadToCloudinary(file, onProgress) {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
 
+  // Audio files use "video" resource type in Cloudinary
+  const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/video/upload`
+
+  console.log('[Cloudinary] Uploading to:', endpoint)
+  console.log('[Cloudinary] Preset:', CLOUDINARY_UPLOAD_PRESET)
+  console.log('[Cloudinary] Cloud:', CLOUDINARY_CLOUD_NAME)
+
+  // Use XHR for upload progress tracking
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', url)
+    xhr.open('POST', endpoint)
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
     }
 
     xhr.onload = () => {
-      if (xhr.status === 200) {
-        try {
-          const data = JSON.parse(xhr.responseText)
-          resolve(data.secure_url)
-        } catch {
-          reject(new Error('Invalid Cloudinary response'))
-        }
+      let body = {}
+      try { body = JSON.parse(xhr.responseText) } catch { /* ignore */ }
+
+      if (xhr.status === 200 && body.secure_url) {
+        console.log('[Cloudinary] Upload success:', body.secure_url)
+        resolve(body.secure_url)
       } else {
-        let msg = `Upload failed (${xhr.status})`
-        try {
-          const d = JSON.parse(xhr.responseText)
-          if (d?.error?.message) msg = d.error.message
-        } catch { /* ignore */ }
+        // Log the real Cloudinary error to help debug
+        const msg = body?.error?.message || `Upload failed (HTTP ${xhr.status})`
+        console.error('[Cloudinary] Error response:', xhr.status, body)
         reject(new Error(msg))
       }
     }
 
-    xhr.onerror = () => reject(new Error('Network error during upload'))
+    xhr.onerror = () => {
+      console.error('[Cloudinary] Network/CORS error — check preset name & type (must be Unsigned)')
+      reject(new Error('Upload blocked — check Cloudinary preset is set to Unsigned'))
+    }
     xhr.onabort = () => reject(new Error('Upload cancelled'))
     xhr.send(fd)
   })
