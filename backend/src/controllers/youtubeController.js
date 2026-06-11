@@ -88,11 +88,16 @@ exports.detectSourceRoute = async (req, res) => {
   let url = (req.body.url || "").trim();
   if (!url) return res.status(400).json({ error: "URL is required" });
   url = sanitizeYoutubeUrl(url);
-  const detected = await detectSource(url);
-  if (detected.source_type === "unsupported") {
-    return res.status(400).json({ error: "Unsupported input source" });
+  try {
+    const detected = await detectSource(url);
+    if (detected.source_type === "unsupported") {
+      return res.status(400).json({ error: "Unsupported input source" });
+    }
+    res.json(detected);
+  } catch (err) {
+    console.error("detectSource error:", err);
+    res.status(500).json({ error: `Source detection failed: ${err.message}` });
   }
-  res.json(detected);
 };
 
 exports.extractAudioUrl = async (req, res) => {
@@ -102,7 +107,14 @@ exports.extractAudioUrl = async (req, res) => {
   if (!url) return res.status(400).json({ error: "URL is required" });
   url = sanitizeYoutubeUrl(url);
 
-  const detected = await detectSource(url);
+  let detected;
+  try {
+    detected = await detectSource(url);
+  } catch (err) {
+    console.error("detectSource error:", err);
+    return res.status(500).json({ error: `Source detection failed: ${err.message}` });
+  }
+
   if (detected.source_type === "unsupported") {
     return res.status(400).json({ error: "Unsupported URL. Use Google Drive, YouTube, or direct audio links." });
   }

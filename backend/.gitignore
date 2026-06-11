@@ -8,6 +8,9 @@ node_modules/
 .pnp
 .pnp.js
 
+cookies.txt
+
+
 # ── Secrets & Environment ─────────────────────────────────────
 .env
 .env.*

@@ -131,13 +131,17 @@ exports.transcribeChunk = (req, res) => {
 
 exports.transcribeLarge = (req, res) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "large_transcribe_"));
-  const inputPath = path.join(tempDir, "input.webm"); // simplistic extension
+  const inputPath = path.join(tempDir, "input.webm");
   let sourceLang = "auto";
-  
+  let targetLang = "en";
+  let action = "translate";
+
   const busboy = Busboy({ headers: req.headers });
 
   busboy.on("field", (fieldname, val) => {
     if (fieldname === "source_lang") sourceLang = val;
+    if (fieldname === "target_lang") targetLang = val;
+    if (fieldname === "action") action = val.toLowerCase();
   });
 
   busboy.on("file", (fieldname, file, info) => {
@@ -149,21 +153,64 @@ exports.transcribeLarge = (req, res) => {
   });
 
   busboy.on("finish", async () => {
+    // ── Check if ffmpeg is available ──────────────────────────────────────────
+    const ffmpegAvailable = await new Promise((resolve) => {
+      const check = spawn("ffmpeg", ["-version"]);
+      check.on("error", () => resolve(false));
+      check.on("close", (code) => resolve(code === 0));
+    });
+
+    if (!ffmpegAvailable) {
+      // ── Fallback: treat the whole file as a single chunk ──────────────────
+      // Works for files up to 25 MB (Whisper limit). For larger files,
+      // install ffmpeg: brew install ffmpeg
+      console.warn("[transcribeLarge] ffmpeg not found — transcribing as single chunk (no segmentation).");
+      try {
+        const fileSize = fs.statSync(inputPath).size;
+        if (fileSize > WHISPER_MAX_BYTES) {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+          return res.status(413).json({
+            error: `File is ${(fileSize / 1024 / 1024).toFixed(1)} MB which exceeds Whisper's 25 MB limit. Install ffmpeg to enable automatic segmentation: brew install ffmpeg`,
+          });
+        }
+
+        const buffer = fs.readFileSync(inputPath);
+        const result = await runWhisper(buffer, "input.webm", "audio/webm", sourceLang);
+
+        sseResponse(res);
+        sendSseMessage(res, { type: "meta", duration: Math.round(result.duration * 10) / 10, detected_lang: result.detected_lang });
+        sendSseMessage(res, { type: "transcript_chunk", index: 0, text: result.text });
+        sendSseMessage(res, { type: "done" });
+        res.end();
+      } catch (err) {
+        console.error("[transcribeLarge] Single-chunk fallback failed:", err.message);
+        if (!res.headersSent) return res.status(500).json({ error: `Transcription failed: ${err.message}` });
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+      return;
+    }
+
+    // ── Normal path: ffmpeg segments the file ─────────────────────────────────
     const segmentsDir = path.join(tempDir, "segments");
     fs.mkdirSync(segmentsDir, { recursive: true });
     const segmentPattern = path.join(segmentsDir, "chunk_%05d.mp3");
 
-    const ffmpegExe = "ffmpeg";
-    const cmdArgs = [
+    const proc = spawn("ffmpeg", [
       "-y", "-i", inputPath,
       "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k",
       "-f", "segment", "-segment_time", "600", "-reset_timestamps", "1",
       segmentPattern,
-    ];
+    ]);
 
-    const proc = spawn(ffmpegExe, cmdArgs);
     let stderr = "";
     proc.stderr.on("data", (d) => (stderr += d.toString()));
+
+    // ── Handle ffmpeg spawn error (ENOENT safety net) ─────────────────────────
+    proc.on("error", (err) => {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      if (!res.headersSent) res.status(500).json({ error: `ffmpeg not available: ${err.message}` });
+    });
 
     proc.on("close", async (code) => {
       if (code !== 0) {
@@ -171,7 +218,12 @@ exports.transcribeLarge = (req, res) => {
         return res.status(500).json({ error: `Failed to segment audio: ${stderr.slice(-400)}` });
       }
 
-      const segmentPaths = fs.readdirSync(segmentsDir).filter(f => f.startsWith("chunk_") && f.endsWith(".mp3")).map(f => path.join(segmentsDir, f)).sort();
+      const segmentPaths = fs
+        .readdirSync(segmentsDir)
+        .filter((f) => f.startsWith("chunk_") && f.endsWith(".mp3"))
+        .map((f) => path.join(segmentsDir, f))
+        .sort();
+
       if (segmentPaths.length === 0) {
         fs.rmSync(tempDir, { recursive: true, force: true });
         return res.status(500).json({ error: "No audio segments were produced from the file." });
@@ -187,28 +239,30 @@ exports.transcribeLarge = (req, res) => {
       let detectedLang = "";
       const ready = {};
 
-      const limit = pLimit(3); // Limit to 3 concurrent requests to avoid API rate limits
-      const transcribePromises = segmentPaths.map((sp, i) => {
-        return limit(() => transcribeSegmentFile(sp, sourceLang, i)
-          .then(result => {
-            completed++;
-            ready[result.index] = result;
-            sendSseMessage(res, { type: "progress", completed, total, message: `Transcribing ${completed}/${total} parts...` });
+      const limit = pLimit(3);
+      const transcribePromises = segmentPaths.map((sp, i) =>
+        limit(() =>
+          transcribeSegmentFile(sp, sourceLang, i)
+            .then((result) => {
+              completed++;
+              ready[result.index] = result;
+              sendSseMessage(res, { type: "progress", completed, total, message: `Transcribing ${completed}/${total} parts...` });
 
-            while (ready[nextIndex]) {
-              const chunkResult = ready[nextIndex];
-              delete ready[nextIndex];
-              if (!detectedLang && chunkResult.detected_lang) detectedLang = chunkResult.detected_lang;
-              durationTotal += chunkResult.duration;
-              sendSseMessage(res, { type: "transcript_chunk", index: nextIndex, text: chunkResult.text });
-              nextIndex++;
-            }
-          })
-          .catch(err => {
-            console.error("Segment error:", err);
-            sendSseMessage(res, { type: "error", message: err.message });
-          }));
-      });
+              while (ready[nextIndex]) {
+                const chunkResult = ready[nextIndex];
+                delete ready[nextIndex];
+                if (!detectedLang && chunkResult.detected_lang) detectedLang = chunkResult.detected_lang;
+                durationTotal += chunkResult.duration;
+                sendSseMessage(res, { type: "transcript_chunk", index: nextIndex, text: chunkResult.text });
+                nextIndex++;
+              }
+            })
+            .catch((err) => {
+              console.error("Segment error:", err);
+              sendSseMessage(res, { type: "error", message: err.message });
+            })
+        )
+      );
 
       try {
         await Promise.all(transcribePromises);
@@ -225,3 +279,4 @@ exports.transcribeLarge = (req, res) => {
 
   req.pipe(busboy);
 };
+

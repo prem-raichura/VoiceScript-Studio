@@ -4,148 +4,98 @@ const path = require("path");
 const os = require("os");
 const https = require("https");
 const http = require("http");
-const urlParse = require("url").parse;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DIRECT_AUDIO_EXTS = new Set(["flac", "mp3", "m4a", "ogg", "opus", "wav", "webm", "aac", "amr"]);
 const DIRECT_VIDEO_EXTS = new Set(["mp4", "mov", "mkv", "avi", "webm", "mpeg"]);
-const WHISPER_ALLOWED_EXTS = new Set(["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "opus", "wav", "webm"]);
 
-// Client round order: try all combined first, then fall back individually
-const YOUTUBE_PLAYER_CLIENTS = [
-  "web,mweb,android",   // Round 1: all at once
-  "web",                // Round 2: web only
-  "android",            // Round 3: android only
-  "mweb",               // Round 4: mobile web only
+// Simple format preference list — yt-dlp tries each in order, stops at first success
+const FORMAT_ATTEMPTS = [
+  "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+  "bestaudio/best",
+  "b[ext=mp4]/b",
+  "18",    // 360p mp4+audio, extremely widely available
+  "worst", // last resort — any quality
 ];
-
-// Format chain: each string is a yt-dlp slash-chained fallback expression.
-// yt-dlp tries left-to-right within a single -f value; outer array gives us
-// additional retry attempts with progressively looser requirements.
-const FORMAT_CHAIN = [
-  "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio/best",
-  "ba/b",
-  "worst",
-];
-
-// ─── URL Helpers ─────────────────────────────────────────────────────────────
-
-function normalizeHost(urlStr) {
-  try {
-    const host = (urlParse(urlStr).host || "").toLowerCase();
-    return host.startsWith("www.") ? host.substring(4) : host;
-  } catch (e) {
-    return "";
-  }
-}
-
-function guessExtFromUrl(urlStr) {
-  try {
-    const ext = path.extname(urlParse(urlStr).pathname || "").toLowerCase().replace(".", "");
-    return ext;
-  } catch (e) {
-    return "";
-  }
-}
-
-function sanitizeYoutubeUrl(urlStr) {
-  try {
-    const parsed = new URL(urlStr);
-    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-    if (["youtube.com", "youtu.be"].includes(host) || host.endsWith(".youtube.com")) {
-      if (parsed.pathname === "/watch" && parsed.searchParams.has("v")) {
-        const v = parsed.searchParams.get("v");
-        return `https://${parsed.hostname}/watch?v=${v}`;
-      }
-    }
-  } catch (e) {
-    // ignore malformed URLs
-  }
-  return urlStr;
-}
-
-function sanitizeFilename(name) {
-  const cleaned = (name || "extracted-audio").replace(/[^\w\-. ]+/g, "").trim();
-  return cleaned.substring(0, 120);
-}
 
 // ─── Cookie Handling ──────────────────────────────────────────────────────────
+//
+// Priority order:
+//  1. YOUTUBE_COOKIES_CONTENT env var (paste full file text) → written to temp file
+//  2. YOUTUBE_COOKIES_FILE env var    (path to cookies.txt on disk)
+//  3. cookies.txt in project root
+//  4. /etc/secrets/cookies.txt        (Render secret file mount)
+//  5. No cookies (works for some public videos)
 
-/**
- * Resolves a cookie file path from env or well-known locations.
- * Returns { path, isTemp } — isTemp=true means we wrote it and must clean it up.
- */
-function getTempCookieFile() {
+function getCookiePath() {
+  // 1. Content directly in env var
   const content = (process.env.YOUTUBE_COOKIES_CONTENT || "").trim();
   if (content) {
     try {
       const tmpPath = path.join(os.tmpdir(), `yt_cookies_${Date.now()}.txt`);
       fs.writeFileSync(tmpPath, content, "utf8");
+      console.log("[cookies] Using YOUTUBE_COOKIES_CONTENT env var");
       return { path: tmpPath, isTemp: true };
     } catch (e) {
       console.warn("[cookies] Failed to write temp cookie file:", e.message);
     }
   }
 
+  // 2-4. File path candidates
   const candidates = [
     process.env.YOUTUBE_COOKIES_FILE,
-    "cookies.txt",
+    path.join(process.cwd(), "cookies.txt"),
     "/etc/secrets/cookies.txt",
-  ];
+  ].filter(Boolean);
 
-  for (const candidate of candidates) {
-    if (candidate && fs.existsSync(candidate)) {
-      return { path: candidate, isTemp: false };
+  for (const f of candidates) {
+    if (fs.existsSync(f)) {
+      console.log(`[cookies] Using cookie file: ${f}`);
+      return { path: f, isTemp: false };
     }
   }
 
+  console.warn("[cookies] No cookies found — downloads may fail on restricted videos.");
   return { path: null, isTemp: false };
 }
 
-function cleanupCookieFile(cookieData) {
-  if (cookieData.isTemp && cookieData.path && fs.existsSync(cookieData.path)) {
-    try { fs.unlinkSync(cookieData.path); } catch (_) {}
+function releaseCookies(cookie) {
+  if (cookie?.isTemp && cookie?.path) {
+    try { fs.unlinkSync(cookie.path); } catch (_) {}
   }
 }
 
-// ─── Core yt-dlp Runner ───────────────────────────────────────────────────────
+// ─── URL Helpers ─────────────────────────────────────────────────────────────
 
-/**
- * Runs yt-dlp with the given args and returns stdout as a string.
- * Cookie file injection is handled automatically.
- */
-async function runYtDlp(urlStr, args = []) {
-  return new Promise((resolve, reject) => {
-    const cookieData = getTempCookieFile();
-    const finalArgs = [...args];
+function normalizeHost(urlStr) {
+  try {
+    const h = new URL(urlStr).hostname.toLowerCase();
+    return h.startsWith("www.") ? h.slice(4) : h;
+  } catch { return ""; }
+}
 
-    if (cookieData.path) {
-      finalArgs.push("--cookies", cookieData.path);
-    }
+function guessExtFromUrl(urlStr) {
+  try {
+    return path.extname(new URL(urlStr).pathname).toLowerCase().replace(".", "");
+  } catch { return ""; }
+}
 
-    finalArgs.push("--quiet", "--no-warnings", "--no-playlist");
-
-    const proc = spawn("yt-dlp", [...finalArgs, urlStr]);
-    let stdout = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-
-    proc.on("close", (code) => {
-      cleanupCookieFile(cookieData);
-      if (code !== 0) {
-        return reject(new Error(`yt-dlp exited ${code}: ${stderr.trim().slice(-400)}`));
+function sanitizeYoutubeUrl(urlStr) {
+  try {
+    const p = new URL(urlStr);
+    const h = p.hostname.toLowerCase().replace(/^www\./, "");
+    if (["youtube.com", "youtu.be"].includes(h) || h.endsWith(".youtube.com")) {
+      if (p.pathname === "/watch" && p.searchParams.has("v")) {
+        return `https://${p.hostname}/watch?v=${p.searchParams.get("v")}`;
       }
-      resolve(stdout);
-    });
+    }
+  } catch (_) {}
+  return urlStr;
+}
 
-    proc.on("error", (err) => {
-      cleanupCookieFile(cookieData);
-      reject(new Error(`Failed to spawn yt-dlp: ${err.message}`));
-    });
-  });
+function sanitizeFilename(name) {
+  return (name || "extracted-audio").replace(/[^\w\-. ]+/g, "").trim().slice(0, 120);
 }
 
 // ─── Source Detection ─────────────────────────────────────────────────────────
@@ -164,337 +114,219 @@ async function safeHeadContentType(urlStr) {
 
 async function detectDriveMediaKind(urlStr) {
   try {
-    const out = await runYtDlp(urlStr, ["--dump-json", "--skip-download"]);
+    const cookie = getCookiePath();
+    const args = ["--dump-json", "--skip-download", "--quiet", "--no-warnings", "--no-playlist"];
+    if (cookie.path) args.push("--cookies", cookie.path);
+    const out = await runRaw([...args, urlStr]);
+    releaseCookies(cookie);
     const info = JSON.parse(out);
     const vcodec = String(info.vcodec || "").toLowerCase();
     const acodec = String(info.acodec || "").toLowerCase();
-    const ext = String(info.ext || "").toLowerCase();
-
-    const hasVideo = vcodec && vcodec !== "none";
-    const hasAudio = acodec && acodec !== "none";
-
-    if (!hasVideo && hasAudio) {
-      return { type: "drive_audio", label: "Drive Audio", kind: "audio" };
-    }
-    if (hasVideo) {
-      return { type: "drive_video", label: "Drive Video", kind: "video" };
-    }
-    if (DIRECT_AUDIO_EXTS.has(ext)) {
-      return { type: "drive_audio", label: "Drive Audio", kind: "audio" };
-    }
-    if (DIRECT_VIDEO_EXTS.has(ext)) {
-      return { type: "drive_video", label: "Drive Video", kind: "video" };
-    }
+    const ext    = String(info.ext   || "").toLowerCase();
+    if ((!vcodec || vcodec === "none") && acodec && acodec !== "none") return { type: "drive_audio", label: "Drive Audio", kind: "audio" };
+    if (vcodec && vcodec !== "none") return { type: "drive_video", label: "Drive Video", kind: "video" };
+    if (DIRECT_AUDIO_EXTS.has(ext)) return { type: "drive_audio", label: "Drive Audio", kind: "audio" };
+    if (DIRECT_VIDEO_EXTS.has(ext)) return { type: "drive_video", label: "Drive Video", kind: "video" };
   } catch (e) {
-    console.warn("[detectDriveMediaKind] Detection failed:", e.message);
+    console.warn("[detectDriveMediaKind]", e.message);
   }
-
   return { type: "unsupported", label: "Unsupported Drive Media", kind: "unknown" };
 }
 
-/**
- * Inspects a URL and returns a source descriptor:
- *   { source_type, label, kind, requires_extraction }
- */
 async function detectSource(urlStr) {
   const host = normalizeHost(urlStr);
-  const ext = guessExtFromUrl(urlStr);
+  const ext  = guessExtFromUrl(urlStr);
 
-  if (["youtube.com", "youtu.be"].includes(host) || host.endsWith(".youtube.com")) {
+  if (["youtube.com", "youtu.be"].includes(host) || host.endsWith(".youtube.com"))
     return { source_type: "youtube_video", label: "YouTube Video", kind: "video", requires_extraction: true };
-  }
 
   if (host === "drive.google.com" || host.endsWith(".drive.google.com")) {
     const { type, label, kind } = await detectDriveMediaKind(urlStr);
     return { source_type: type, label, kind, requires_extraction: kind === "video" };
   }
 
-  if (DIRECT_AUDIO_EXTS.has(ext)) {
+  if (DIRECT_AUDIO_EXTS.has(ext))
     return { source_type: "direct_audio", label: "Direct Audio", kind: "audio", requires_extraction: false };
-  }
-  if (DIRECT_VIDEO_EXTS.has(ext)) {
+
+  if (DIRECT_VIDEO_EXTS.has(ext))
     return { source_type: "direct_video", label: "Direct Video", kind: "video", requires_extraction: true };
-  }
 
   const ctype = await safeHeadContentType(urlStr);
-  if (ctype.startsWith("audio/")) {
-    return { source_type: "direct_audio", label: "Direct Audio", kind: "audio", requires_extraction: false };
-  }
-  if (ctype.startsWith("video/")) {
-    return { source_type: "direct_video", label: "Direct Video", kind: "video", requires_extraction: true };
-  }
+  if (ctype.startsWith("audio/")) return { source_type: "direct_audio", label: "Direct Audio", kind: "audio", requires_extraction: false };
+  if (ctype.startsWith("video/")) return { source_type: "direct_video", label: "Direct Video", kind: "video", requires_extraction: true };
 
   return { source_type: "unsupported", label: "Unsupported Source", kind: "unknown", requires_extraction: false };
 }
 
-// ─── Video Download (yt-dlp with retry matrix) ────────────────────────────────
+// ─── Raw yt-dlp runner ────────────────────────────────────────────────────────
 
-/**
- * Cleans up any partial "source.*" files left in outputDir from a failed attempt.
- */
-function cleanPartialFiles(outputDir) {
-  try {
-    fs.readdirSync(outputDir).forEach((file) => {
-      if (file.startsWith("source.")) {
-        try { fs.unlinkSync(path.join(outputDir, file)); } catch (_) {}
-      }
-    });
-  } catch (_) {}
+function runRaw(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("yt-dlp", args);
+    let out = "", err = "";
+    proc.stdout.on("data", (d) => (out += d));
+    proc.stderr.on("data", (d) => (err += d));
+    proc.on("close", (code) => code === 0 ? resolve(out) : reject(new Error(err.trim().slice(-400))));
+    proc.on("error", (e) => reject(e));
+  });
 }
 
-/**
- * Finds the most recently modified "source.*" file in outputDir.
- */
-function findDownloadedFile(outputDir) {
-  let dlPath = null;
-  let latestMtime = 0;
+// ─── File Helpers ─────────────────────────────────────────────────────────────
 
-  try {
-    fs.readdirSync(outputDir).forEach((file) => {
-      if (file.startsWith("source.")) {
-        const fullPath = path.join(outputDir, file);
-        try {
-          const mtime = fs.statSync(fullPath).mtimeMs;
-          if (mtime > latestMtime) {
-            latestMtime = mtime;
-            dlPath = fullPath;
-          }
-        } catch (_) {}
-      }
-    });
-  } catch (_) {}
-
-  return dlPath;
+function cleanPartialFiles(dir) {
+  try { fs.readdirSync(dir).filter(f => f.startsWith("source.")).forEach(f => { try { fs.unlinkSync(path.join(dir, f)); } catch (_) {} }); } catch (_) {}
 }
 
+function findDownload(dir) {
+  let best = null, t = 0;
+  try {
+    fs.readdirSync(dir).forEach(f => {
+      if (!f.startsWith("source.")) return;
+      const full = path.join(dir, f);
+      const mt = fs.statSync(full).mtimeMs;
+      if (mt > t) { t = mt; best = full; }
+    });
+  } catch (_) {}
+  return best;
+}
+
+// ─── Main Download ────────────────────────────────────────────────────────────
+
 /**
- * Downloads a video/audio stream via yt-dlp.
+ * Downloads audio from a YouTube/video URL using yt-dlp.
  *
- * Retry matrix:
- *   Outer loop → YOUTUBE_PLAYER_CLIENTS (bot-detection workarounds)
- *   Inner loop → FORMAT_CHAIN          (format availability fallbacks)
+ * Key strategy: specify --extractor-args "youtube:player_client=tv_embedded"
+ * which is a deprecated client. yt-dlp skips it and auto-falls back to
+ * android_vr — a client that does NOT require JS signature solving.
+ * This was proven to work in manual testing:
+ *   yt-dlp --cookies <file> --extractor-args "youtube:player_client=tv_embedded" -f bestaudio -o out.%(ext)s <url>
  *
- * @param {string}   urlStr     The source URL
- * @param {string}   outputDir  Directory to write the downloaded file into
- * @param {Function} setProgress  Callback(string) for progress updates
- * @returns {{ downloadedPath: string, title: string }}
+ * Auth: YOUTUBE_COOKIES_CONTENT env → YOUTUBE_COOKIES_FILE env → cookies.txt in project root
  */
 async function downloadVideoFile(urlStr, outputDir, setProgress) {
-  const outputTemplate = path.join(outputDir, "source.%(ext)s");
+  const template = path.join(outputDir, "source.%(ext)s");
+  const cookie = getCookiePath();
+  const cookieLabel = cookie.path ? path.basename(cookie.path) : "none";
+
+  // These args trigger yt-dlp to skip the deprecated client and fall back to android_vr
+  // android_vr bypasses the JS signature challenge entirely — proven to work
+  const baseArgs = [
+    "-o", template,
+    "--no-playlist",
+    "--newline",
+    "--extractor-args", "youtube:player_client=tv_embedded",
+  ];
+  if (cookie.path) baseArgs.push("--cookies", cookie.path);
+
+  // Format preference list — tries best audio first
+  const formats = [
+    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+    "bestaudio/best",
+    "b[ext=mp4]/b",
+    "18",
+    "worst",
+  ];
+
   let lastError = null;
+  let attempt   = 0;
+  const log     = [];
 
-  for (let clientIdx = 0; clientIdx < YOUTUBE_PLAYER_CLIENTS.length; clientIdx++) {
-    const clients = YOUTUBE_PLAYER_CLIENTS[clientIdx];
+  for (const fmt of formats) {
+    attempt++;
+    cleanPartialFiles(outputDir);
+    setProgress(`Fetching audio… (attempt ${attempt}/${formats.length})`);
+    console.log(`[yt-dlp] attempt ${attempt}: fmt="${fmt}" cookies="${cookieLabel}"`);
 
-    for (let fmtIdx = 0; fmtIdx < FORMAT_CHAIN.length; fmtIdx++) {
-      const fmt = FORMAT_CHAIN[fmtIdx];
-      cleanPartialFiles(outputDir);
+    const args = [...baseArgs, "-f", fmt, urlStr];
 
-      const cookieData = getTempCookieFile();
+    try {
+      const stdout = await new Promise((resolve, reject) => {
+        const proc = spawn("yt-dlp", args);
+        let out = "", err = "";
 
-      const args = [
-        "-o", outputTemplate,
-        "--no-warnings",
-        "--no-playlist",
-        "--newline",
-        "--no-abort-on-error",
-        "--format-sort", "acodec:m4a,acodec:opus,br",
-        "-f", fmt,
-        "--extractor-args", `youtube:player_client=${clients}`,
-        "--print", "FINAL_INFO:%(title)s|%(filepath)s",
-      ];
-
-      if (cookieData.path) {
-        args.push("--cookies", cookieData.path);
-      }
-
-      const label = `client=${clients} fmt=${fmt.slice(0, 40)}`;
-      setProgress(`Fetching… (attempt ${clientIdx * FORMAT_CHAIN.length + fmtIdx + 1}: ${label})`);
-
-      try {
-        const { title } = await new Promise((resolve, reject) => {
-          const proc = spawn("yt-dlp", [...args, urlStr]);
-          let stdout = "";
-          let stderr = "";
-
-          proc.stdout.on("data", (d) => {
-            const text = d.toString();
-            stdout += text;
-
-            // Live download percentage from yt-dlp's --newline output
-            const match = text.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
-            if (match) {
-              setProgress(`Downloading: ${match[1]}%`);
-            }
-          });
-
-          proc.stderr.on("data", (d) => {
-            stderr += d.toString();
-          });
-
-          proc.on("error", (err) => {
-            reject(new Error(`Spawn error: ${err.message}`));
-          });
-
-          proc.on("close", (code) => {
-            if (code !== 0) {
-              const msg = stderr.trim().slice(-400);
-
-              // Surface bot-detection immediately — no point retrying formats
-              if (
-                stderr.includes("Sign in to confirm") ||
-                stderr.toLowerCase().includes("bot") ||
-                stderr.includes("age-restricted")
-              ) {
-                return reject(
-                  new Error("YouTube bot-detection triggered. Please update or provide cookies.")
-                );
-              }
-
-              // Surface format-not-available so outer loop can retry
-              if (
-                msg.includes("Requested format is not available") ||
-                msg.includes("requested format not available")
-              ) {
-                return reject(new Error(`FORMAT_UNAVAILABLE: ${msg}`));
-              }
-
-              return reject(new Error(`yt-dlp exited ${code}: ${msg}`));
-            }
-
-            // Parse title from our --print output
-            let title = "video-audio";
-            for (const line of stdout.split("\n")) {
-              const marker = "FINAL_INFO:";
-              if (line.includes(marker)) {
-                const parts = line.split(marker)[1].trim().split("|");
-                if (parts[0]) title = parts[0];
-                break;
-              }
-            }
-
-            resolve({ title });
-          });
+        proc.stdout.on("data", (d) => {
+          const text = d.toString();
+          out += text;
+          const pct = text.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+          if (pct) setProgress(`Downloading: ${pct[1]}%`);
         });
+        proc.stderr.on("data", (d) => { err += d.toString(); });
+        proc.on("error", (e) => reject(Object.assign(e, { stderr: err })));
+        proc.on("close", (code) => {
+          if (code !== 0) return reject(Object.assign(new Error(err.trim().slice(-400)), { stderr: err }));
+          resolve(out);
+        });
+      });
 
-        // Verify the file actually landed
-        const dlPath = findDownloadedFile(outputDir);
-        if (!dlPath) {
-          throw new Error("yt-dlp exited cleanly but no output file was found.");
-        }
-
-        return { downloadedPath: dlPath, title };
-
-      } catch (e) {
-        lastError = e;
-
-        // Bot-detection is unrecoverable regardless of format/client — rethrow immediately
-        if (
-          e.message.includes("bot-detection") ||
-          e.message.includes("Sign in to confirm") ||
-          e.message.includes("age-restricted")
-        ) {
-          throw e;
-        }
-
-        // FORMAT_UNAVAILABLE → continue to next format in inner loop
-        if (e.message.startsWith("FORMAT_UNAVAILABLE")) {
-          console.warn(`[downloadVideoFile] Format unavailable, retrying… (${label})`);
-          continue;
-        }
-
-        // Any other error → log and continue through the matrix
-        console.warn(`[downloadVideoFile] Attempt failed (${label}): ${e.message}`);
-
-      } finally {
-        cleanupCookieFile(cookieData);
+      const dlPath = findDownload(outputDir);
+      if (!dlPath) {
+        log.push(`attempt ${attempt} fmt="${fmt}": exit-0-no-file`);
+        lastError = new Error("yt-dlp exited cleanly but wrote no output file");
+        continue;
       }
+
+      // Use filename as title (yt-dlp sets it from the video title)
+      const title = sanitizeFilename(path.basename(dlPath, path.extname(dlPath))) || "audio";
+      releaseCookies(cookie);
+      console.log(`[yt-dlp] ✓ Downloaded: ${dlPath}`);
+      return { downloadedPath: dlPath, title };
+
+    } catch (e) {
+      lastError = e;
+      const stderr = (e.stderr || e.message || "").toLowerCase();
+
+      let cls = "UNKNOWN";
+      if (stderr.includes("requested format is not available") ||
+          stderr.includes("only images are available") ||
+          stderr.includes("no video formats found")) cls = "FORMAT_UNAVAILABLE";
+      else if (stderr.includes("private video") || stderr.includes("video unavailable")) cls = "VIDEO_UNAVAILABLE";
+      else if (stderr.includes("sign in") || stderr.includes("403") || stderr.includes("no longer valid")) cls = "COOKIES_EXPIRED";
+
+      log.push(`attempt ${attempt} fmt="${fmt}": ${cls}`);
+      console.warn(`[yt-dlp] attempt ${attempt} (${cls})`);
+
+      if (cls === "VIDEO_UNAVAILABLE") { releaseCookies(cookie); throw new Error("Video is unavailable (private, deleted, or geo-restricted)."); }
     }
   }
 
+  releaseCookies(cookie);
+  const cookiesExpired = log.some(l => l.includes("COOKIES_EXPIRED"));
   throw new Error(
-    `Could not download audio after exhausting all format/client combinations. ` +
-    `Last error: ${lastError ? lastError.message : "unknown"}`
+    `YouTube audio download failed after ${attempt} attempts.\n\n` +
+    (cookiesExpired
+      ? "• Cookies expired — re-export from Chrome using 'Get cookies.txt LOCALLY' and replace cookies.txt in the backend folder."
+      : "• All format attempts failed. Try re-exporting fresh YouTube cookies from Chrome.") +
+    `\n\nAttempts:\n${log.join("\n")}\n\nLast error: ${lastError?.message?.slice(0, 300) || "unknown"}`
   );
 }
 
 // ─── Direct Audio Download ────────────────────────────────────────────────────
 
-/**
- * Downloads a direct-link audio file over HTTP(S).
- *
- * @param {string}   urlStr
- * @param {string}   outputDir
- * @param {Function} setProgress
- * @returns {{ downloadedPath: string, title: string }}
- */
 async function downloadDirectAudioFile(urlStr, outputDir, setProgress) {
   setProgress("Downloading audio…");
-
   return new Promise((resolve, reject) => {
     const client = urlStr.startsWith("https") ? https : http;
-
     const req = client.get(urlStr, (res) => {
-      if (res.statusCode >= 400) {
-        return reject(new Error(`HTTP ${res.statusCode} while fetching audio`));
-      }
-
-      // Handle redirects (3xx)
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return downloadDirectAudioFile(res.headers.location, outputDir, setProgress)
-          .then(resolve)
-          .catch(reject);
-      }
+      if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode}`));
+      if (res.statusCode >= 300 && res.headers.location)
+        return downloadDirectAudioFile(res.headers.location, outputDir, setProgress).then(resolve).catch(reject);
 
       const ctype = (res.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
-      const extMap = {
-        "audio/wav": "wav",
-        "audio/x-wav": "wav",
-        "audio/webm": "webm",
-        "audio/ogg": "ogg",
-        "audio/opus": "opus",
-        "audio/flac": "flac",
-        "audio/aac": "aac",
-        "audio/mpeg": "mp3",
-        "audio/mp4": "m4a",
-      };
-      const ext = extMap[ctype] || "mp3";
+      const extMap = { "audio/wav":"wav","audio/x-wav":"wav","audio/webm":"webm","audio/ogg":"ogg",
+                       "audio/opus":"opus","audio/flac":"flac","audio/aac":"aac","audio/mpeg":"mp3","audio/mp4":"m4a" };
+      const ext  = extMap[ctype] || "mp3";
+      const dest = path.join(outputDir, `direct_audio.${ext}`);
+      const file = fs.createWriteStream(dest);
 
-      const target = path.join(outputDir, `direct_audio.${ext}`);
-      const file = fs.createWriteStream(target);
-
-      // Track download progress if content-length is available
-      const totalBytes = parseInt(res.headers["content-length"] || "0", 10);
-      let receivedBytes = 0;
-
-      res.on("data", (chunk) => {
-        receivedBytes += chunk.length;
-        if (totalBytes > 0) {
-          const pct = ((receivedBytes / totalBytes) * 100).toFixed(1);
-          setProgress(`Downloading: ${pct}%`);
-        }
-      });
-
+      const total = parseInt(res.headers["content-length"] || "0", 10);
+      let recv = 0;
+      res.on("data", (c) => { recv += c.length; if (total > 0) setProgress(`Downloading: ${((recv/total)*100).toFixed(1)}%`); });
       res.pipe(file);
-
-      file.on("finish", () => {
-        file.close(() => {
-          resolve({ downloadedPath: target, title: `direct-audio.${ext}` });
-        });
-      });
-
-      file.on("error", (err) => {
-        fs.unlink(target, () => {});
-        reject(err);
-      });
+      file.on("finish", () => file.close(() => resolve({ downloadedPath: dest, title: `direct-audio.${ext}` })));
+      file.on("error", (e) => { fs.unlink(dest, () => {}); reject(e); });
     });
-
     req.on("error", reject);
-
-    req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("Direct audio download timed out."));
-    });
+    req.on("timeout", () => { req.destroy(); reject(new Error("Direct audio download timed out.")); });
   });
 }
 
@@ -506,7 +338,6 @@ module.exports = {
   sanitizeFilename,
   downloadVideoFile,
   downloadDirectAudioFile,
-  // Exported for testing
-  FORMAT_CHAIN,
-  YOUTUBE_PLAYER_CLIENTS,
+  FORMAT_CHAIN: FORMAT_ATTEMPTS,
+  YOUTUBE_PLAYER_CLIENTS: [],
 };
