@@ -215,16 +215,6 @@ function FeatureCard({ f, index }) {
 export default function LandingPage({ onStart }) {
   const [statsRef, statsVisible] = useReveal()
   const [stepsRef, stepsVisible] = useReveal()
-  const [ripple, setRipple] = useState(null)
-
-  const handleStart = useCallback((e) => {
-    const btn = e.currentTarget
-    const rect = btn.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    setRipple({ x, y })
-    setTimeout(() => { setRipple(null); onStart() }, 380)
-  }, [onStart])
 
   return (
     <div className="relative min-h-screen overflow-x-hidden">
@@ -279,16 +269,10 @@ export default function LandingPage({ onStart }) {
         <div className="animate-fade-up-delay3 flex flex-col sm:flex-row items-center gap-4 mb-14">
           <button
             id="hero-start-btn"
-            onClick={handleStart}
-            className="hero-btn group relative overflow-hidden"
+            onClick={onStart}
+            className="hero-btn group"
           >
-            {ripple && (
-              <span
-                className="absolute rounded-full bg-white/30 animate-ripple"
-                style={{ width: 200, height: 200, top: ripple.y - 100, left: ripple.x - 100 }}
-              />
-            )}
-            <Play size={16} fill="white" className="group-hover:scale-110 transition-transform" />
+            <Play size={16} fill="white" />
             <span>Start Transcribing</span>
             <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
           </button>
@@ -457,7 +441,7 @@ export default function LandingPage({ onStart }) {
             </p>
             <button
               id="cta-start-btn"
-              onClick={handleStart}
+              onClick={onStart}
               className="relative overflow-hidden inline-flex items-center gap-2.5 px-8 py-4 rounded-full bg-white text-violet-700 font-black text-base shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 active:scale-95 group"
             >
               <FileText size={18} className="group-hover:rotate-6 transition-transform" />

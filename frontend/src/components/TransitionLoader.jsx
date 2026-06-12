@@ -1,0 +1,225 @@
+import { useEffect, useState } from 'react'
+
+/* ── Bone primitives ── */
+function Bone({ className = '', style }) {
+  return (
+    <div
+      className={`animate-skeleton rounded-xl bg-gradient-to-r from-slate-100 via-slate-200 to-slate-100 bg-[length:400%_100%] ${className}`}
+      style={style}
+    />
+  )
+}
+function BoneRound({ className = '' }) {
+  return (
+    <div
+      className={`animate-skeleton rounded-full bg-gradient-to-r from-slate-100 via-slate-200 to-slate-100 bg-[length:400%_100%] ${className}`}
+    />
+  )
+}
+
+/* ════════════════════════════════════════════
+   SIDEBAR  — matches <aside> in App.jsx exactly
+   w-full lg:w-80, border-r, bg-white/60
+   ════════════════════════════════════════════ */
+function SidebarSkeleton() {
+  return (
+    <aside className="relative z-20 w-full lg:w-80 border-r border-white/60 backdrop-blur-xl bg-white/60 shadow-glass flex flex-col lg:h-full flex-shrink-0">
+
+      {/* Brand header — p-5, w-10 h-10 rounded-2xl icon, two text lines */}
+      <div className="p-5 border-b border-white/60 flex items-center gap-3">
+        <Bone className="w-10 h-10 rounded-2xl flex-shrink-0" />
+        <div className="flex flex-col gap-2 flex-1">
+          <Bone className="h-[14px] w-36" />
+          <Bone className="h-[10px] w-24" />
+        </div>
+      </div>
+
+      {/* LanguageSelector — p-5, two selects + globe icon between them */}
+      <div className="p-5 border-b border-white/60">
+        {/* label row */}
+        <div className="flex items-end gap-3">
+          {/* Source select */}
+          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+            <Bone className="h-[10px] w-28 rounded-md" />
+            <Bone className="h-10 w-full rounded-xl" />
+          </div>
+          {/* Globe icon circle — w-7 h-7 rounded-full */}
+          <div className="flex-shrink-0 mb-3">
+            <BoneRound className="w-7 h-7" />
+          </div>
+          {/* Target select */}
+          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+            <Bone className="h-[10px] w-20 rounded-md" />
+            <Bone className="h-10 w-full rounded-xl" />
+          </div>
+        </div>
+      </div>
+
+      {/* History area — flex-1 p-5 */}
+      <div className="flex-1 p-5 overflow-y-auto scrollbar-thin space-y-3">
+        {/* "Recent sessions" label */}
+        <div className="flex items-center justify-between px-1">
+          <Bone className="h-[10px] w-24 rounded-md" />
+          <Bone className="h-[10px] w-12 rounded-md" />
+        </div>
+        {/* Two history item cards — w-full p-3.5 rounded-xl border */}
+        {[0, 1].map(i => (
+          <div key={i} className="w-full p-3.5 rounded-xl border border-slate-100 bg-white/60 flex items-start gap-3">
+            <div className="flex-1 min-w-0 space-y-2">
+              <Bone className="h-[11px] w-4/5 rounded-md" />
+              <Bone className="h-[10px] w-3/5 rounded-md" />
+              <Bone className="h-[9px] w-1/3 rounded-md" />
+            </div>
+            <Bone className="w-3 h-3 rounded-sm flex-shrink-0 mt-1" />
+          </div>
+        ))}
+      </div>
+    </aside>
+  )
+}
+
+/* ════════════════════════════════════════════
+   MAIN  — matches <main> in App.jsx exactly
+   flex-1, h-full, overflow-y-auto
+   ════════════════════════════════════════════ */
+function MainSkeleton() {
+  return (
+    <main className="relative z-10 flex-1 h-full overflow-y-auto scrollbar-thin flex flex-col">
+
+      {/* Header bar — h-16, hidden on mobile, lg:flex */}
+      <div className="h-16 border-b border-white/60 backdrop-blur-md bg-white/40 items-center justify-between px-6 flex-shrink-0 hidden lg:flex">
+        <Bone className="h-[11px] w-64 rounded-md" />
+        <Bone className="h-8 w-16 rounded-xl" />
+      </div>
+
+      {/* Grid — p-4 lg:p-6, grid-cols-1 xl:grid-cols-12, gap-6 */}
+      <div className="p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 w-full max-w-7xl mx-auto">
+
+        {/* ── Upload panel — glass-panel p-5 xl:col-span-12 flex lg:flex-row gap-6 ── */}
+        <section className="glass-panel p-5 xl:col-span-12 flex flex-col lg:flex-row gap-6 items-stretch">
+          {/* Left: heading text */}
+          <div className="flex-1 w-full space-y-4 flex flex-col justify-center">
+            <div className="space-y-2">
+              {/* h1 text-2xl font-black */}
+              <Bone className="h-7 w-40 rounded-lg" />
+              {/* p text-sm */}
+              <Bone className="h-[13px] w-64 rounded-md" />
+            </div>
+          </div>
+
+          {/* Separator */}
+          <div className="hidden lg:block w-px bg-white/10" />
+
+          {/* Right: Uploader — w-full max-w-sm */}
+          <div className="flex-1 w-full flex items-center justify-center">
+            <div className="w-full max-w-sm space-y-3">
+              {/* Drop zone — rounded-2xl border-2 border-dashed py-10 px-6 */}
+              <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 flex flex-col items-center justify-center gap-3 py-10 px-6">
+                {/* Upload icon — w-14 h-14 rounded-2xl */}
+                <Bone className="w-14 h-14 rounded-2xl" />
+                {/* "Drag & drop" text */}
+                <Bone className="h-[13px] w-48 rounded-md" />
+                {/* subtext */}
+                <Bone className="h-[11px] w-36 rounded-md" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Action & Status — xl:col-span-4 flex flex-col gap-6 ── */}
+        <section className="xl:col-span-4 flex flex-col gap-6">
+
+          {/* Action buttons panel — glass-panel p-5 space-y-4 */}
+          <div className="glass-panel p-5 space-y-4">
+            <div className="flex flex-col gap-3">
+              {/* btn-ghost py-3 — ~44px tall */}
+              <Bone className="h-11 w-full rounded-xl" />
+              {/* btn-brand py-3 — ~44px tall */}
+              <Bone className="h-11 w-full rounded-xl" />
+            </div>
+          </div>
+
+          {/* Pipeline status panel — glass-panel p-5 space-y-3 */}
+          <div className="glass-panel p-5 space-y-3">
+            {/* label text-[10px] */}
+            <Bone className="h-[10px] w-24 rounded-md" />
+            {/* 3 steps — flex items-center gap-3 text-sm */}
+            {[0, 1, 2].map(i => (
+              <div key={i} className="flex items-center gap-3">
+                {/* icon — size 16 = 1rem */}
+                <BoneRound className="w-4 h-4 flex-shrink-0" />
+                <Bone className="h-[13px] flex-1 rounded-md" />
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Transcript Panel — xl:col-span-8 flex flex-col gap-4 ── */}
+        <section className="xl:col-span-8 flex flex-col gap-4">
+
+          {/* Transcript section — rounded-2xl border p-5 */}
+          <div className="rounded-2xl border border-white/80 bg-white/70 p-5 space-y-3">
+            {/* Panel header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Bone className="w-5 h-5 rounded-lg flex-shrink-0" />
+                <Bone className="h-[10px] w-20 rounded-md" />
+              </div>
+              {/* Copy button — px-3 py-1.5 rounded-lg text-xs */}
+              <Bone className="h-7 w-16 rounded-xl" />
+            </div>
+            {/* Text lines */}
+            <div className="space-y-2">
+              {[0.95, 0.80, 0.90, 0.65, 0.82].map((w, i) => (
+                <Bone key={i} className="h-[14px] rounded-md" style={{ width: `${w * 100}%` }} />
+              ))}
+            </div>
+          </div>
+
+          {/* Translation section — rounded-2xl border-violet-200/60 bg-violet-50/70 p-5 */}
+          <div className="rounded-2xl border border-violet-200/50 bg-violet-50/40 p-5 space-y-3">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Bone className="w-5 h-5 rounded-lg flex-shrink-0" />
+                <Bone className="h-[10px] w-24 rounded-md" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              {[0.88, 0.72, 0.93, 0.60].map((w, i) => (
+                <Bone key={i} className="h-[14px] rounded-md" style={{ width: `${w * 100}%` }} />
+              ))}
+            </div>
+          </div>
+
+        </section>
+      </div>
+    </main>
+  )
+}
+
+/* ════════════════════════════════════════════
+   ROOT — matches App.jsx outer shell exactly
+   min-h-screen lg:h-screen w-full flex flex-col lg:flex-row
+   ════════════════════════════════════════════ */
+export default function TransitionLoader({ onDone }) {
+  const [fadeOut, setFadeOut] = useState(false)
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setFadeOut(true), 1600)
+    const t2 = setTimeout(() => onDone(), 2100)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [onDone])
+
+  return (
+    <div
+      className={`fixed inset-0 z-[9999] transition-opacity duration-500 ease-in-out ${
+        fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
+      }`}
+    >
+      <div className="min-h-screen lg:h-screen w-full bg-transparent relative overflow-hidden text-slate-800 flex flex-col lg:flex-row">
+        <SidebarSkeleton />
+        <MainSkeleton />
+      </div>
+    </div>
+  )
+}
