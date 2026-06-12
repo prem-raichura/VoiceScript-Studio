@@ -4,12 +4,32 @@ import { toast } from 'react-hot-toast'
 
 const MAX_MB = 1228
 const CHUNK_SIZE = 4 * 1024 * 1024 // 4 MB per chunk
+const UPLOAD_CONCURRENCY = 4 // parallel chunk uploads — much faster than sequential
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+
+async function uploadOneChunk(sessionId, file, totalChunks, index) {
+  const start = index * CHUNK_SIZE
+  const end = Math.min(start + CHUNK_SIZE, file.size)
+  const chunk = file.slice(start, end)
+
+  const fd = new FormData()
+  fd.append('session_id', sessionId)
+  fd.append('chunk_index', String(index))
+  fd.append('total_chunks', String(totalChunks))
+  fd.append('chunk', chunk, file.name)
+
+  const res = await fetch(`${API_BASE}/api/upload-chunk`, { method: 'POST', body: fd })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `Chunk ${index + 1} upload failed (${res.status})`)
+  }
+}
 
 /**
  * Uploads a file to the Render backend in 4 MB chunks.
  * 1. POST /api/upload-init   → gets session_id (also wakes Render)
- * 2. POST /api/upload-chunk  × N  → sends each 4 MB slice
+ * 2. POST /api/upload-chunk  × N  → sends slices with limited concurrency
+ * Chunks carry their own index, so order of arrival does not matter.
  * Returns session_id on success.
  */
 async function uploadToServer(file, onProgress) {
@@ -21,27 +41,24 @@ async function uploadToServer(file, onProgress) {
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
   console.log(`[upload] session=${session_id} chunks=${totalChunks} file=${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`)
 
-  // Step 2 — upload chunks sequentially
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE
-    const end = Math.min(start + CHUNK_SIZE, file.size)
-    const chunk = file.slice(start, end)
+  // Step 2 — upload chunks with a bounded concurrency pool
+  let nextIndex = 0
+  let completed = 0
 
-    const fd = new FormData()
-    fd.append('session_id', session_id)
-    fd.append('chunk_index', String(i))
-    fd.append('total_chunks', String(totalChunks))
-    fd.append('chunk', chunk, file.name)
-
-    const res = await fetch(`${API_BASE}/api/upload-chunk`, { method: 'POST', body: fd })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.error || `Chunk ${i + 1} upload failed (${res.status})`)
+  const worker = async () => {
+    while (nextIndex < totalChunks) {
+      const index = nextIndex++
+      await uploadOneChunk(session_id, file, totalChunks, index)
+      completed++
+      onProgress(Math.round((completed / totalChunks) * 100))
     }
-
-    onProgress(Math.round(((i + 1) / totalChunks) * 100))
-    console.log(`[upload] chunk ${i + 1}/${totalChunks} done`)
   }
+
+  const workers = Array.from(
+    { length: Math.min(UPLOAD_CONCURRENCY, totalChunks) },
+    () => worker(),
+  )
+  await Promise.all(workers)
 
   return session_id
 }

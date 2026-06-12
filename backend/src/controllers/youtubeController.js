@@ -37,12 +37,14 @@ function setUrlJob(jobId, updates) {
   }
 }
 
-async function processUrlAudioJob(jobId, url) {
+async function processUrlAudioJob(jobId, url, detected) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `url_audio_${jobId}_`));
   setUrlJob(jobId, { status: "detecting", message: "Detecting source…", tempDir });
 
   try {
-    const detected = await detectSource(url);
+    // Reuse the detection already performed in extractAudioUrl to avoid a
+    // second (and for Google Drive, expensive yt-dlp) detection round-trip.
+    if (!detected) detected = await detectSource(url);
     const sourceType = detected.source_type;
     const sourceLabel = detected.label;
     const kind = detected.kind;
@@ -138,8 +140,8 @@ exports.extractAudioUrl = async (req, res) => {
     updatedAt: now,
   });
 
-  // Start background job
-  processUrlAudioJob(jobId, url);
+  // Start background job (reuse the detection we just did)
+  processUrlAudioJob(jobId, url, detected);
 
   res.status(202).json({
     job_id: jobId,

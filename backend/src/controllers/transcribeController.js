@@ -1,4 +1,5 @@
 const fs = require("fs");
+const fsp = require("fs/promises");
 const path = require("path");
 const os = require("os");
 const multer = require("multer");
@@ -26,7 +27,7 @@ async function runWhisper(audioBuffer, filename, contentType, sourceLang) {
   // We need to convert Buffer to a file object for groq SDK
   // We can write it to a temp file
   const tempPath = path.join(os.tmpdir(), `whisper_tmp_${Date.now()}_${filename}`);
-  fs.writeFileSync(tempPath, audioBuffer);
+  await fsp.writeFile(tempPath, audioBuffer);
 
   try {
     const kwargs = {
@@ -45,14 +46,12 @@ async function runWhisper(audioBuffer, filename, contentType, sourceLang) {
       duration: transcript.duration || 0,
     };
   } finally {
-    if (fs.existsSync(tempPath)) {
-      fs.unlinkSync(tempPath);
-    }
+    await fsp.unlink(tempPath).catch(() => {});
   }
 }
 
 async function transcribeSegmentFile(filePath, sourceLang, index) {
-  const buffer = fs.readFileSync(filePath);
+  const buffer = await fsp.readFile(filePath);
   const result = await runWhisper(buffer, path.basename(filePath), "audio/mpeg", sourceLang);
   return { index, ...result };
 }
@@ -175,7 +174,7 @@ exports.transcribeLarge = (req, res) => {
           });
         }
 
-        const buffer = fs.readFileSync(inputPath);
+        const buffer = await fsp.readFile(inputPath);
         const result = await runWhisper(buffer, "input.webm", "audio/webm", sourceLang);
 
         sseResponse(res);
@@ -320,6 +319,12 @@ exports.transcribeFromUrl = async (req, res) => {
   if (!url) return res.status(400).json({ error: "url is required" });
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "url_transcribe_"));
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    fs.rm(tempDir, { recursive: true, force: true }, () => {});
+  };
 
   try {
     // Guess extension from URL (Cloudinary keeps the original extension)
@@ -331,6 +336,7 @@ exports.transcribeFromUrl = async (req, res) => {
     try {
       await downloadFromUrl(url, inputPath);
     } catch (e) {
+      cleanup();
       return res.status(502).json({ error: `Failed to download audio: ${e.message}` });
     }
 
@@ -338,7 +344,7 @@ exports.transcribeFromUrl = async (req, res) => {
 
     // ── Small file: transcribe directly ───────────────────────────────────────
     if (fileSize <= WHISPER_MAX_BYTES) {
-      const buffer = fs.readFileSync(inputPath);
+      const buffer = await fsp.readFile(inputPath);
       const result = await runWhisper(buffer, `input.${ext}`, `audio/${ext}`, source_lang);
 
       sseResponse(res);
@@ -351,6 +357,7 @@ exports.transcribeFromUrl = async (req, res) => {
         sendSseMessage(res, { type: "done" });
         res.end();
       }
+      cleanup();
       return;
     }
 
@@ -362,6 +369,7 @@ exports.transcribeFromUrl = async (req, res) => {
     });
 
     if (!ffmpegAvailable) {
+      cleanup();
       return res.status(413).json({
         error: `File is ${(fileSize / 1024 / 1024).toFixed(1)} MB — exceeds Whisper's 25 MB limit. Install ffmpeg to enable segmentation.`,
       });
@@ -381,11 +389,13 @@ exports.transcribeFromUrl = async (req, res) => {
     let ffmpegErr = "";
     proc.stderr.on("data", (d) => (ffmpegErr += d.toString()));
     proc.on("error", (e) => {
+      cleanup();
       if (!res.headersSent) res.status(500).json({ error: `ffmpeg error: ${e.message}` });
     });
 
     proc.on("close", async (code) => {
       if (code !== 0) {
+        cleanup();
         if (!res.headersSent) res.status(500).json({ error: `ffmpeg failed: ${ffmpegErr.slice(-300)}` });
         return;
       }
@@ -396,6 +406,7 @@ exports.transcribeFromUrl = async (req, res) => {
         .sort();
 
       if (!segmentPaths.length) {
+        cleanup();
         return res.status(500).json({ error: "No audio segments produced." });
       }
 
@@ -437,12 +448,12 @@ exports.transcribeFromUrl = async (req, res) => {
 
       sendSseMessage(res, { type: "done" });
       res.end();
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      cleanup();
     });
 
   } catch (err) {
+    cleanup();
     if (!res.headersSent) res.status(500).json({ error: err.message });
-    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 };
 
@@ -472,7 +483,7 @@ exports.transcribeSession = async (req, res) => {
 
     // ── Small file: transcribe directly ───────────────────────────────────────
     if (fileSize <= WHISPER_MAX_BYTES) {
-      const buffer = fs.readFileSync(outputPath);
+      const buffer = await fsp.readFile(outputPath);
       const result = await runWhisper(buffer, `input.${ext}`, `audio/${ext}`, source_lang);
 
       sseResponse(res);

@@ -511,6 +511,8 @@ export default function App() {
     let finalOriginalText = ''
     let appendQueue = Promise.resolve()
 
+    const WORDS_PER_TICK = 14
+    const TICK_MS = 12
     const appendWithTyping = (text) => {
       const words = (text || '').trim().split(/\s+/).filter(Boolean)
       if (!words.length) return Promise.resolve()
@@ -523,7 +525,7 @@ export default function App() {
             resolve()
             return
           }
-          const chunk = words.slice(i, i + 6).join(' ')
+          const chunk = words.slice(i, i + WORDS_PER_TICK).join(' ')
           if (chunk) {
             setOriginal((prev) => {
               const next = prev ? `${prev} ${chunk}` : chunk
@@ -531,12 +533,12 @@ export default function App() {
               return next
             })
           }
-          i += 6
+          i += WORDS_PER_TICK
           if (i >= words.length) {
             clearInterval(timer)
             resolve()
           }
-        }, 25)
+        }, TICK_MS)
       })
     }
 

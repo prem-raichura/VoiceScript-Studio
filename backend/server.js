@@ -15,6 +15,11 @@ const uploadController = require("./src/controllers/uploadController");
 
 const app = express();
 
+// Render (and most PaaS) put the app behind a reverse proxy. Without this,
+// express-rate-limit sees every request as coming from the proxy IP and
+// throttles all users together (and logs ERR_ERL_* validation errors).
+app.set("trust proxy", 1);
+
 // Production Middlewares
 app.use(helmet());
 app.use(morgan("combined"));
