@@ -10,7 +10,6 @@ dotenv.config();
 const healthController = require("./src/controllers/healthController");
 const transcribeController = require("./src/controllers/transcribeController");
 const translateController = require("./src/controllers/translateController");
-const youtubeController = require("./src/controllers/youtubeController");
 const uploadController = require("./src/controllers/uploadController");
 
 const app = express();
@@ -59,11 +58,6 @@ app.get("/health", healthController.health);
 
 // API Routes
 const apiRouter = express.Router();
-
-apiRouter.post("/detect-source", apiLimiter, youtubeController.detectSourceRoute);
-apiRouter.post("/extract-audio-url", apiLimiter, youtubeController.extractAudioUrl);
-apiRouter.get("/extract-audio-url/status/:job_id", youtubeController.extractAudioUrlStatus);
-apiRouter.get("/extract-audio-url/download/:job_id", youtubeController.extractAudioUrlDownload);
 
 apiRouter.post("/transcribe", apiLimiter, transcribeController.transcribe);
 apiRouter.post("/transcribe-chunk", apiLimiter, transcribeController.transcribeChunk);
