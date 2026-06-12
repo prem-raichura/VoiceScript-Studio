@@ -69,7 +69,7 @@
     box-shadow: 0 10px 40px -10px rgba(109, 40, 217, 0.10);
   }
 
-  /* ── Brand button — vivid violet→pink gradient ── */
+  /* ── Brand button — rich deep indigo→violet→pink gradient ── */
   .btn-brand {
     position: relative;
     display: inline-flex;
@@ -78,12 +78,12 @@
     gap: 0.5rem;
     padding: 0.75rem 1.5rem;
     border-radius: 0.875rem;
-    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #ec4899 100%);
+    background: linear-gradient(135deg, #4338ca 0%, #6d28d9 50%, #be185d 100%);
     color: #ffffff;
-    font-weight: 700;
+    font-weight: 750;
     font-size: 0.875rem;
     line-height: 1.25rem;
-    box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35), 0 1px 0 rgba(255,255,255,0.2) inset;
+    box-shadow: 0 4px 14px rgba(109, 40, 217, 0.25), 0 1px 0 rgba(255,255,255,0.2) inset;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     border: 1px solid rgba(255,255,255,0.15);
     overflow: hidden;
@@ -92,14 +92,14 @@
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(135deg, #6d28d9 0%, #9333ea 50%, #db2777 100%);
+    background: linear-gradient(135deg, #312e81 0%, #4c1d95 50%, #831843 100%);
     opacity: 0;
     transition: opacity 0.2s;
     border-radius: inherit;
   }
   .btn-brand:hover::before { opacity: 1; }
   .btn-brand:hover {
-    box-shadow: 0 6px 20px rgba(124, 58, 237, 0.45), 0 1px 0 rgba(255,255,255,0.2) inset;
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4), 0 1px 0 rgba(255,255,255,0.2) inset;
     transform: translateY(-1px);
   }
   .btn-brand:active {
@@ -113,32 +113,32 @@
   .btn-brand:focus-visible {
     outline: 2px solid transparent;
     outline-offset: 2px;
-    box-shadow: 0 0 0 2px #fff, 0 0 0 4px #7c3aed;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px #8b5cf6;
   }
   .btn-brand span, .btn-brand svg { position: relative; z-index: 1; }
 
-  /* ── Ghost button ── */
+  /* ── Ghost button — refined glassmorphic outline ── */
   .btn-ghost {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.625rem 1rem;
     border-radius: 0.875rem;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 0.875rem;
     line-height: 1.25rem;
-    color: #6d28d9;
-    border: 1.5px solid rgba(124, 58, 237, 0.18);
-    background-color: rgba(139, 92, 246, 0.06);
+    color: #7c3aed;
+    border: 1.5px solid rgba(124, 58, 237, 0.25);
+    background-color: rgba(124, 58, 237, 0.04);
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     backdrop-filter: blur(12px);
   }
   .btn-ghost:hover {
-    background-color: rgba(139, 92, 246, 0.12);
-    border-color: rgba(124, 58, 237, 0.30);
-    color: #5b21b6;
+    background-color: rgba(124, 58, 237, 0.09);
+    border-color: rgba(124, 58, 237, 0.45);
+    color: #6d28d9;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.10);
+    box-shadow: 0 4px 14px rgba(124, 58, 237, 0.12);
   }
   .btn-ghost:active { transform: scale(0.97) translateY(0); }
   .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
@@ -256,14 +256,14 @@
     gap: 0.625rem;
     padding: 1rem 2.25rem;
     border-radius: 9999px;
-    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 45%, #ec4899 100%);
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 35%, #ec4899 70%, #f97316 100%);
     color: #fff;
     font-weight: 800;
     font-size: 1rem;
     letter-spacing: -0.01em;
-    box-shadow: 0 8px 30px rgba(124, 58, 237, 0.40), 0 1px 0 rgba(255,255,255,0.2) inset;
+    box-shadow: 0 8px 32px rgba(99, 102, 241, 0.35), 0 1px 0 rgba(255,255,255,0.25) inset;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1.5px solid rgba(255,255,255,0.2);
+    border: 1.5px solid rgba(255,255,255,0.25);
     overflow: hidden;
     cursor: pointer;
   }
@@ -271,7 +271,7 @@
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(135deg, #6d28d9 0%, #9333ea 45%, #db2777 100%);
+    background: linear-gradient(135deg, #3730a3 0%, #5b21b6 35%, #9d174d 70%, #c2410c 100%);
     opacity: 0;
     transition: opacity 0.25s;
     border-radius: inherit;
@@ -279,7 +279,7 @@
   .hero-btn:hover::before { opacity: 1; }
   .hero-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 14px 40px rgba(124, 58, 237, 0.50), 0 1px 0 rgba(255,255,255,0.2) inset;
+    box-shadow: 0 14px 40px rgba(99, 102, 241, 0.50), 0 1px 0 rgba(255,255,255,0.25) inset;
   }
   .hero-btn:active { transform: translateY(0px) scale(0.98); }
   .hero-btn span, .hero-btn svg { position: relative; z-index: 1; }

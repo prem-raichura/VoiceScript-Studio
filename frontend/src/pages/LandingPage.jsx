@@ -20,36 +20,40 @@ import {
 const FEATURES = [
   {
     icon: Upload,
-    color: 'from-violet-500 to-purple-600',
+    color: 'from-violet-600 to-indigo-600',
     border: 'border-violet-100',
     glow: 'shadow-violet-200/60',
+    hoverGlow: 'hover:shadow-[0_20px_50px_rgba(124,58,237,0.18)] hover:border-violet-300/50',
     title: 'Easy Upload',
     desc: 'Drag & drop any audio or video file. Supports MP3, MP4, WAV, M4A, WebM and more.',
     delay: 0,
   },
   {
     icon: Zap,
-    color: 'from-pink-500 to-rose-500',
+    color: 'from-pink-500 to-rose-600',
     border: 'border-pink-100',
     glow: 'shadow-pink-200/60',
+    hoverGlow: 'hover:shadow-[0_20px_50px_rgba(244,63,94,0.18)] hover:border-pink-300/50',
     title: 'Fast Transcription',
     desc: 'Powered by Groq Whisper — transcribe hours of audio in seconds with high accuracy.',
     delay: 100,
   },
   {
     icon: Globe,
-    color: 'from-cyan-500 to-blue-500',
+    color: 'from-cyan-500 to-blue-600',
     border: 'border-cyan-100',
     glow: 'shadow-cyan-200/60',
+    hoverGlow: 'hover:shadow-[0_20px_50px_rgba(6,182,212,0.18)] hover:border-cyan-300/50',
     title: 'Multi-Language',
     desc: 'Translate transcripts into 13 languages instantly using advanced AI models.',
     delay: 200,
   },
   {
     icon: Download,
-    color: 'from-orange-400 to-amber-500',
+    color: 'from-amber-500 to-orange-600',
     border: 'border-orange-100',
     glow: 'shadow-orange-200/60',
+    hoverGlow: 'hover:shadow-[0_20px_50px_rgba(245,158,11,0.18)] hover:border-amber-300/50',
     title: 'Export Anywhere',
     desc: 'Download your results as TXT, DOC, PDF, or JSON — ready for any workflow.',
     delay: 300,
@@ -60,24 +64,27 @@ const STEPS = [
   {
     num: '01',
     icon: Upload,
-    color: 'from-violet-500 to-purple-600',
-    ring: 'ring-violet-200',
+    color: 'from-violet-600 to-indigo-600',
+    ring: 'ring-violet-100',
+    hoverGlow: 'hover:shadow-[0_20px_50px_rgba(124,58,237,0.15)] hover:border-violet-300/40',
     title: 'Upload Your Audio',
     desc: 'Drop a file or record directly in the browser.',
   },
   {
     num: '02',
     icon: Wand2,
-    color: 'from-pink-500 to-rose-500',
-    ring: 'ring-pink-200',
+    color: 'from-pink-500 to-rose-600',
+    ring: 'ring-pink-100',
+    hoverGlow: 'hover:shadow-[0_20px_50px_rgba(244,63,94,0.15)] hover:border-pink-300/40',
     title: 'AI Transcribes It',
     desc: 'Our Whisper-powered engine converts speech to text in seconds.',
   },
   {
     num: '03',
     icon: Languages,
-    color: 'from-cyan-500 to-blue-500',
-    ring: 'ring-cyan-200',
+    color: 'from-cyan-500 to-blue-600',
+    ring: 'ring-cyan-100',
+    hoverGlow: 'hover:shadow-[0_20px_50px_rgba(6,182,212,0.15)] hover:border-cyan-300/40',
     title: 'Translate & Export',
     desc: 'Translate to any language and export in your preferred format.',
   },
@@ -190,7 +197,7 @@ function FeatureCard({ f, index }) {
   return (
     <div
       ref={ref}
-      className="feature-card group relative overflow-hidden"
+      className={`feature-card group relative overflow-hidden transition-all duration-300 ${f.hoverGlow || ''}`}
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? 'translateY(0)' : 'translateY(36px)',
@@ -235,7 +242,7 @@ export default function LandingPage({ onStart }) {
       {/* ── Nav ── */}
       <nav className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 backdrop-blur-xl bg-white/75 border-b border-white/80 shadow-sm animate-fade-down">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-pink-500 flex items-center justify-center shadow-lg shadow-violet-200 animate-pulse-ring">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 via-violet-600 to-pink-500 flex items-center justify-center shadow-lg shadow-violet-300/60 animate-pulse-ring">
             <Mic size={17} className="text-white" />
           </div>
           <span className="font-extrabold text-slate-900 tracking-tight text-lg">
@@ -248,7 +255,7 @@ export default function LandingPage({ onStart }) {
       <section className="relative flex flex-col items-center justify-center text-center px-6 pt-20 pb-10">
 
         {/* Pill badge with spinning icon */}
-        <div className="animate-fade-up inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-violet-100 to-pink-100 border border-violet-200 text-violet-700 text-xs font-bold uppercase tracking-widest mb-8 shadow-sm">
+        <div className="animate-fade-up inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-violet-500/10 via-purple-500/5 to-pink-500/10 border border-violet-500/20 text-violet-850 text-xs font-bold uppercase tracking-widest mb-8 shadow-sm backdrop-blur-md">
           <Sparkles size={11} className="animate-spin-slow" />
           AI-Powered Audio Intelligence
         </div>
@@ -310,31 +317,31 @@ export default function LandingPage({ onStart }) {
               </div>
             </div>
             {/* Content */}
-            <div className="bg-gradient-to-br from-slate-50 via-violet-50/30 to-pink-50/20 p-6 min-h-[220px] flex items-center justify-center">
+            <div className="bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-pink-500/10 p-6 min-h-[220px] flex items-center justify-center">
               <div className="grid grid-cols-3 gap-4 w-full max-w-2xl">
-                <div className="col-span-3 bg-white/75 rounded-2xl p-4 border border-white shadow-sm flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center flex-shrink-0">
+                <div className="col-span-3 bg-white/90 backdrop-blur-md rounded-2xl p-4 border border-white/60 shadow-[0_8px_30px_rgba(109,40,217,0.04)] flex items-center gap-4 animate-scale-in">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 via-violet-500 to-pink-500 flex items-center justify-center flex-shrink-0">
                     <Mic size={18} className="text-white" />
                   </div>
                   <div className="flex-1">
-                    <div className="h-3 w-2/3 bg-gradient-to-r from-violet-200 to-pink-200 rounded-full mb-2 shimmer-bg" />
-                    <div className="h-2 w-1/2 bg-slate-100 rounded-full" />
+                    <div className="h-3 w-2/3 bg-gradient-to-r from-violet-400 to-pink-400 rounded-full mb-2 shimmer-bg" />
+                    <div className="h-2 w-1/2 bg-slate-200/60 rounded-full" />
                   </div>
-                  <div className="h-8 w-28 rounded-xl bg-gradient-to-r from-violet-500 to-pink-500 opacity-80 animate-pulse" />
+                  <div className="h-8 w-28 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-500 to-pink-500 opacity-90 animate-pulse" />
                 </div>
-                <div className="col-span-2 bg-white/75 rounded-2xl p-4 border border-white shadow-sm">
-                  <div className="h-2 w-1/3 bg-violet-200 rounded-full mb-3" />
-                  <div className="space-y-2">
+                <div className="col-span-2 bg-white/90 backdrop-blur-md rounded-2xl p-4 border border-white/60 shadow-[0_8px_30px_rgba(109,40,217,0.04)]">
+                  <div className="h-2.5 w-1/3 bg-gradient-to-r from-violet-500/40 to-indigo-500/40 rounded-full mb-3.5" />
+                  <div className="space-y-2.5">
                     {[0.9, 0.7, 0.85, 0.6, 0.8].map((w, i) => (
-                      <div key={i} className="h-2 bg-gradient-to-r from-slate-100 to-violet-50 rounded-full shimmer-bg" style={{ width: `${w * 100}%`, animationDelay: `${i * 0.15}s` }} />
+                      <div key={i} className="h-2 bg-gradient-to-r from-slate-100 to-violet-100/50 rounded-full shimmer-bg" style={{ width: `${w * 100}%`, animationDelay: `${i * 0.15}s` }} />
                     ))}
                   </div>
                 </div>
-                <div className="bg-white/75 rounded-2xl p-4 border border-white shadow-sm">
-                  <div className="h-2 w-1/2 bg-pink-200 rounded-full mb-3" />
-                  <div className="space-y-2">
+                <div className="bg-white/90 backdrop-blur-md rounded-2xl p-4 border border-white/60 shadow-[0_8px_30px_rgba(109,40,217,0.04)]">
+                  <div className="h-2.5 w-1/2 bg-gradient-to-r from-pink-500/40 to-rose-500/40 rounded-full mb-3.5" />
+                  <div className="space-y-2.5">
                     {[0.8, 0.65, 0.75].map((w, i) => (
-                      <div key={i} className="h-2 bg-gradient-to-r from-slate-100 to-pink-50 rounded-full shimmer-bg" style={{ width: `${w * 100}%`, animationDelay: `${i * 0.2}s` }} />
+                      <div key={i} className="h-2 bg-gradient-to-r from-slate-100 to-pink-100/50 rounded-full shimmer-bg" style={{ width: `${w * 100}%`, animationDelay: `${i * 0.2}s` }} />
                     ))}
                   </div>
                 </div>
@@ -381,7 +388,7 @@ export default function LandingPage({ onStart }) {
             {STEPS.map((step, i) => (
               <div key={step.num} className="flex-1 flex flex-col lg:flex-row items-center">
                 <div
-                  className="feature-card flex-1 flex flex-col items-center text-center p-8 w-full group"
+                  className={`feature-card flex-1 flex flex-col items-center text-center p-8 w-full group transition-all duration-300 ${step.hoverGlow || ''}`}
                   style={{
                     opacity: stepsVisible ? 1 : 0,
                     transform: stepsVisible ? 'translateY(0) scale(1)' : 'translateY(24px) scale(0.97)',
@@ -422,7 +429,7 @@ export default function LandingPage({ onStart }) {
 
       {/* ── CTA Banner ── */}
       <section className="px-6 py-20 max-w-4xl mx-auto text-center">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-600 via-purple-600 to-pink-600 p-12 shadow-[0_24px_80px_rgba(124,58,237,0.40)] animate-gradient bg-[length:200%_200%]">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-tr from-indigo-700 via-violet-600 via-pink-600 to-orange-500 p-12 shadow-[0_24px_80px_rgba(124,58,237,0.35)] animate-gradient bg-[length:200%_200%] border border-white/10">
           <div className="absolute top-0 left-0 w-72 h-72 bg-white/10 rounded-full -translate-x-1/2 -translate-y-1/2 blur-3xl animate-pulse-ring" />
           <div className="absolute bottom-0 right-0 w-72 h-72 bg-pink-400/20 rounded-full translate-x-1/3 translate-y-1/3 blur-3xl animate-float-alt" />
           <div className="absolute inset-0 opacity-10" style={{
@@ -442,7 +449,7 @@ export default function LandingPage({ onStart }) {
             <button
               id="cta-start-btn"
               onClick={onStart}
-              className="relative overflow-hidden inline-flex items-center gap-2.5 px-8 py-4 rounded-full bg-white text-violet-700 font-black text-base shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 active:scale-95 group"
+              className="relative overflow-hidden inline-flex items-center gap-2.5 px-8 py-4 rounded-full bg-white text-indigo-900 font-black text-base shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 active:scale-95 group"
             >
               <FileText size={18} className="group-hover:rotate-6 transition-transform" />
               Open VoiceScript Studio
@@ -453,7 +460,7 @@ export default function LandingPage({ onStart }) {
       </section>
 
       {/* ── Footer ── */}
-      <footer className="border-t border-white/60 backdrop-blur-xl bg-white/55 px-6 py-8">
+      <footer className="border-t border-violet-100/60 backdrop-blur-xl bg-white/40 px-6 py-8">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-600 to-pink-500 flex items-center justify-center shadow-md shadow-violet-200">

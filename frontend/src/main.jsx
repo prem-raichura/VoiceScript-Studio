@@ -7,7 +7,7 @@ import TransitionLoader from './components/TransitionLoader.jsx'
 import { Analytics } from "@vercel/analytics/react"
 
 function Root() {
-  // 'landing' | 'loading' | 'app'
+
   const [view, setView] = useState('landing')
 
   const handleStart = useCallback(() => {
