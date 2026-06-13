@@ -132,14 +132,14 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
   const formatSize = b => b < 1024 * 1024 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`
 
   return (
-    <div className="space-y-3">
+    <div className="h-full flex flex-col space-y-3">
       <div
         onDragOver={e => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => !disabled && !uploading && inputRef.current.click()}
         className={`relative rounded-2xl border-2 border-dashed transition-all duration-300 cursor-pointer
-          flex flex-col items-center justify-center gap-2 py-6 px-5 text-center select-none
+          flex flex-col items-center justify-center gap-3 flex-1 px-6 text-center select-none
           ${disabled || uploading ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}
           ${dragging
             ? 'border-brand-400 bg-slate-50 scale-[1.02]'
@@ -189,17 +189,17 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
           </>
         ) : (
           <>
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300
+            <div className={`w-9 h-9 flex items-center justify-center transition-all duration-300
               ${dragging
-                ? 'bg-slate-500 text-slate-900 scale-110 shadow-brand'
-                : 'bg-slate-50 text-indigo-600 group-hover:bg-indigo-500/10'}`}>
-              <Upload size={18} className={dragging ? 'animate-bounce' : ''} />
+                ? 'text-indigo-700 scale-110'
+                : 'text-indigo-500'}`}>
+              <Upload size={22} strokeWidth={1.75} className={dragging ? 'animate-bounce' : ''} />
             </div>
-            <div>
-              <p className="font-semibold text-sm text-slate-800">
+            <div className="space-y-1">
+              <p className="font-semibold text-[13px] text-slate-800 leading-snug">
                 {dragging ? 'Drop your audio file here' : 'Drag & drop or click to upload'}
               </p>
-              <p className="text-xs text-slate-500 mt-1.5">MP3, WAV, M4A, OGG, WebM · up to 1.2 GB</p>
+              <p className="text-[11px] text-slate-400 leading-snug">MP3, WAV, M4A, OGG, WebM · up to 1.2 GB</p>
             </div>
           </>
         )}
