@@ -1,21 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, X, CheckCircle2, AlertCircle, Server, Loader2, FileAudio } from 'lucide-react'
+import { Upload, X, CheckCircle2, AlertCircle, Server, Loader2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 
 const MAX_MB = 1228
-const CHUNK_SIZE = 4 * 1024 * 1024
-const UPLOAD_CONCURRENCY = 4
+const CHUNK_SIZE = 4 * 1024 * 1024 // 4 MB per chunk
+const UPLOAD_CONCURRENCY = 4 // parallel chunk uploads — much faster than sequential
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 async function uploadOneChunk(sessionId, file, totalChunks, index) {
   const start = index * CHUNK_SIZE
   const end = Math.min(start + CHUNK_SIZE, file.size)
   const chunk = file.slice(start, end)
+
   const fd = new FormData()
   fd.append('session_id', sessionId)
   fd.append('chunk_index', String(index))
   fd.append('total_chunks', String(totalChunks))
   fd.append('chunk', chunk, file.name)
+
   const res = await fetch(`${API_BASE}/api/upload-chunk`, { method: 'POST', body: fd })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
@@ -23,13 +25,26 @@ async function uploadOneChunk(sessionId, file, totalChunks, index) {
   }
 }
 
+/**
+ * Uploads a file to the Render backend in 4 MB chunks.
+ * 1. POST /api/upload-init   → gets session_id (also wakes Render)
+ * 2. POST /api/upload-chunk  × N  → sends slices with limited concurrency
+ * Chunks carry their own index, so order of arrival does not matter.
+ * Returns session_id on success.
+ */
 async function uploadToServer(file, onProgress) {
+  // Step 1 — init session (wakes Render if sleeping)
   const initRes = await fetch(`${API_BASE}/api/upload-init`, { method: 'POST' })
   if (!initRes.ok) throw new Error(`Server init failed (${initRes.status})`)
   const { session_id } = await initRes.json()
+
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+  console.log(`[upload] session=${session_id} chunks=${totalChunks} file=${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`)
+
+  // Step 2 — upload chunks with a bounded concurrency pool
   let nextIndex = 0
   let completed = 0
+
   const worker = async () => {
     while (nextIndex < totalChunks) {
       const index = nextIndex++
@@ -38,8 +53,13 @@ async function uploadToServer(file, onProgress) {
       onProgress(Math.round((completed / totalChunks) * 100))
     }
   }
-  const workers = Array.from({ length: Math.min(UPLOAD_CONCURRENCY, totalChunks) }, () => worker())
+
+  const workers = Array.from(
+    { length: Math.min(UPLOAD_CONCURRENCY, totalChunks) },
+    () => worker(),
+  )
   await Promise.all(workers)
+
   return session_id
 }
 
@@ -58,7 +78,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
 
   function validate(f) {
     if (!f) return 'No file selected.'
-    if (f.size > MAX_MB * 1024 * 1024) return 'File too large. Max 1.2 GB.'
+    if (f.size > MAX_MB * 1024 * 1024) return `File too large. Max 1.2 GB.`
     return null
   }
 
@@ -70,6 +90,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
     setUploading(true)
     setUploadProgress(0)
     setUploadStatus('Connecting to server…')
+
     try {
       const sessionId = await uploadToServer(f, (pct) => {
         setUploadProgress(pct)
@@ -77,7 +98,8 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
       })
       setUploading(false)
       setUploadStatus('')
-      toast.success('File uploaded — ready to process!')
+      toast.success(`File uploaded — ready to process!`)
+      // Pass session:// ref as the cloudinary URL slot — App.jsx routes accordingly
       onAudioReady(f, f.name, `session://${sessionId}`)
     } catch (e) {
       setUploading(false)
@@ -87,6 +109,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
       const msg = e.message || 'Upload failed. Try again.'
       setError(msg)
       toast.error(msg.slice(0, 80))
+      console.error('[upload] failed:', e)
     }
   }
 
@@ -109,84 +132,83 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
   const formatSize = b => b < 1024 * 1024 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`
 
   return (
-    <div className="space-y-3 w-full">
+    <div className="space-y-3">
       <div
         onDragOver={e => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => !disabled && !uploading && inputRef.current.click()}
-        className={[
-          'relative rounded-2xl border-2 border-dashed transition-all duration-300 cursor-pointer',
-          'flex flex-col items-center justify-center gap-4 py-10 px-6 text-center select-none min-h-[180px]',
-          disabled || uploading ? 'opacity-60 cursor-not-allowed pointer-events-none' : '',
-          dragging
-            ? 'border-violet-400 bg-violet-50/80 scale-[1.02] shadow-lg shadow-violet-100'
+        className={`relative rounded-2xl border-2 border-dashed transition-all duration-300 cursor-pointer
+          flex flex-col items-center justify-center gap-3 py-10 px-6 text-center select-none
+          ${disabled || uploading ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}
+          ${dragging
+            ? 'border-brand-400 bg-slate-50 scale-[1.02]'
             : file && !uploading
-            ? 'border-green-400/50 bg-gradient-to-br from-green-50 to-emerald-50/60'
-            : uploading
-            ? 'border-violet-400/40 bg-gradient-to-br from-violet-50 to-pink-50/40'
-            : 'border-violet-300/40 bg-gradient-to-br from-white/80 to-violet-50/30 hover:border-violet-400/60 hover:bg-violet-50/40 hover:scale-[1.01]',
-        ].join(' ')}
+              ? 'border-green-500/30 bg-gradient-to-br from-green-50 to-emerald-50'
+              : uploading
+                ? 'border-indigo-400/40 bg-gradient-to-br from-indigo-50 to-violet-50'
+                : 'border-brand-500/30 bg-gradient-to-br from-white to-brand-50/40 hover:border-brand-400 hover:from-brand-50 hover:to-indigo-50 hover:scale-[1.01]'}`}
       >
-        {/* Uploading */}
+        {/* ── Uploading state ── */}
         {uploading ? (
           <>
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-100 to-pink-100 flex items-center justify-center">
-              <Server size={26} className="text-violet-500 animate-pulse" />
+            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center">
+              <Server size={26} className="text-indigo-500 animate-pulse" />
             </div>
-            <div className="space-y-2.5 w-full max-w-[240px]">
-              <p className="font-bold text-sm text-slate-700">{uploadStatus}</p>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div className="animate-fade-in space-y-2 w-full max-w-[220px]">
+              <p className="font-semibold text-sm text-slate-800">{uploadStatus}</p>
+              <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-violet-500 to-pink-500 rounded-full transition-all duration-300"
+                  className="h-full bg-indigo-500 rounded-full transition-all duration-300"
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
-              <p className="text-xs text-slate-400 font-medium">
+              <p className="text-xs text-slate-500">
                 {file ? `${formatSize(Math.round(file.size * uploadProgress / 100))} / ${formatSize(file.size)}` : ''}
               </p>
             </div>
           </>
         ) : file ? (
           <>
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center animate-scale-in shadow-md shadow-green-100">
-              <CheckCircle2 size={28} className="text-green-500" />
+            <div className="relative">
+              <div className="w-14 h-14 rounded-2xl bg-green-500/20 flex items-center justify-center animate-scale-in">
+                <CheckCircle2 size={28} className="text-green-500" />
+              </div>
             </div>
-            <div className="space-y-1">
-              <p className="font-bold text-sm text-slate-800 truncate max-w-[220px]">{file.name}</p>
-              <p className="text-xs text-slate-400 font-medium">{formatSize(file.size)} · Ready to process</p>
+            <div className="animate-fade-in space-y-1">
+              <p className="font-semibold text-sm text-slate-800 truncate max-w-[200px]">{file.name}</p>
+              <p className="text-xs text-slate-500">{formatSize(file.size)} · Ready to process</p>
             </div>
             <button
               onClick={clear}
-              className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center bg-white/80 border border-slate-200 text-slate-500 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all duration-150 shadow-sm"
+              className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center
+                         text-slate-700 hover:text-slate-700 hover:bg-white/80 transition-all duration-150"
             >
-              <X size={13} />
+              <X size={14} />
             </button>
           </>
         ) : (
           <>
-            <div className={[
-              'w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-md',
-              dragging
-                ? 'bg-gradient-to-br from-violet-500 to-pink-500 text-white scale-110'
-                : 'bg-gradient-to-br from-violet-100 to-pink-100 text-violet-500'
-            ].join(' ')}>
-              <Upload size={24} className={dragging ? 'animate-bounce' : ''} />
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300
+              ${dragging
+                ? 'bg-slate-500 text-slate-900 scale-110 shadow-brand'
+                : 'bg-slate-50 text-indigo-600 group-hover:bg-indigo-500/10'}`}>
+              <Upload size={22} className={dragging ? 'animate-bounce' : ''} />
             </div>
             <div>
-              <p className="font-bold text-sm text-slate-700">
-                {dragging ? 'Drop your file here!' : 'Drag & drop or click to upload'}
+              <p className="font-semibold text-sm text-slate-800">
+                {dragging ? 'Drop your audio file here' : 'Drag & drop or click to upload'}
               </p>
-              <p className="text-xs text-slate-400 mt-1.5 font-medium">MP3, WAV, M4A, OGG, WebM · up to 1.2 GB</p>
+              <p className="text-xs text-slate-500 mt-1.5">MP3, WAV, M4A, OGG, WebM · up to 1.2 GB</p>
             </div>
           </>
         )}
       </div>
 
       {error && (
-        <div className="flex items-center gap-2 text-xs text-red-600 px-3 py-2 rounded-xl bg-red-50 border border-red-100 animate-scale-in font-medium">
-          <AlertCircle size={13} className="flex-shrink-0" /> {error}
-        </div>
+        <p className="text-xs text-red-500 px-2 py-1.5 rounded-lg bg-red-50 border border-red-500/20 animate-fade-in flex items-center gap-1.5">
+          <AlertCircle size={12} /> {error}
+        </p>
       )}
 
       <input

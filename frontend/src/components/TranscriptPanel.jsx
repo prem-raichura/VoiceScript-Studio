@@ -1,24 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Check, FileText, Languages, Clock, Zap, Sparkles, Download } from 'lucide-react'
+import { Copy, Check, FileText, Languages, Clock, Zap, Sparkles } from 'lucide-react'
 
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false)
+
   async function copy() {
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
+
   return (
     <button
       onClick={copy}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${
-        copied
-          ? 'bg-green-50 text-green-600 border border-green-200'
-          : 'bg-violet-50 text-violet-600 border border-violet-200 hover:bg-violet-100'
-      }`}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95 ${copied
+          ? 'bg-green-500/20 text-green-400 border border-green-200'
+          : 'bg-slate-50 text-brand-500 border border-slate-200 hover:bg-indigo-500/10'
+        }`}
     >
       {copied ? <Check size={11} /> : <Copy size={11} />}
-      {copied ? 'Copied!' : 'Copy'}
+      {copied ? 'Copied' : 'Copy'}
     </button>
   )
 }
@@ -30,9 +31,8 @@ function ExportButtons({ onExport }) {
         <button
           key={format}
           onClick={() => onExport(format.toLowerCase())}
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-violet-200 bg-white text-[10px] font-bold text-violet-600 hover:bg-violet-50 hover:border-violet-300 transition-all active:scale-95"
+          className="px-2 py-1 rounded-md border border-slate-200 bg-white/80/80 text-[10px] font-semibold text-brand-500 hover:bg-slate-50 transition-colors"
         >
-          <Download size={9} />
           {format}
         </button>
       ))}
@@ -47,83 +47,74 @@ function normalizeParagraphText(text = '') {
     .split('\n')
     .map((line) => line.replace(/^\s*(?:[-*•]+|\d+[.)])\s+/, '').trimEnd())
     .join('\n')
-  return withoutMarkers
+  const paragraphs = withoutMarkers
     .split(/\n{2,}/)
-    .map((p) => p.replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim())
+    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
+  return paragraphs
 }
 
 function Panel({ icon: Icon, label, text, loading, loadingLabel, accent, onExport }) {
   const scrollRef = useRef(null)
   const paragraphs = useMemo(() => normalizeParagraphText(text), [text])
   const normalizedText = useMemo(() => paragraphs.join('\n\n'), [paragraphs])
+  const accentClasses = accent
+    ? 'bg-gradient-to-br from-indigo-50/60 to-white/80 border-brand-500/30'
+    : 'bg-gradient-to-br from-white/80 to-slate-50/80 border-white/80'
+  const labelColor = accent ? 'text-indigo-600' : 'text-slate-500'
+  const textColor = accent ? 'text-slate-700' : 'text-slate-800'
 
   useEffect(() => {
     if (!scrollRef.current || !paragraphs.length) return
-    scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    const el = scrollRef.current
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [paragraphs, loading])
 
   return (
-    <section className={`rounded-2xl border p-4 sm:p-5 transition-all duration-500 ${
-      accent
-        ? 'bg-gradient-to-br from-violet-50/70 to-pink-50/40 border-violet-200/60'
-        : 'bg-white/70 border-white/80'
-    } backdrop-blur-sm shadow-sm`}>
-
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-        <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${
-          accent ? 'text-violet-600' : 'text-slate-500'
-        }`}>
-          <div className={`w-5 h-5 rounded-lg flex items-center justify-center ${
-            accent
-              ? 'bg-gradient-to-br from-violet-500 to-pink-500'
-              : 'bg-gradient-to-br from-slate-400 to-slate-500'
-          }`}>
-            <Icon size={11} className="text-white" />
-          </div>
-          {label}
+    <section className={`rounded-2xl border p-5 transition-all duration-500 animate-slide-up ${accentClasses}`}>
+      <div className="flex items-center justify-between mb-3 gap-3">
+        <div className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest ${labelColor}`}>
+          <Icon size={12} />
+          <span>{label}</span>
         </div>
-        <div className="flex items-center gap-2">
-          {normalizedText && onExport ? <ExportButtons onExport={onExport} /> : null}
-          {normalizedText ? <CopyButton text={normalizedText} /> : null}
-        </div>
+        {normalizedText ? <CopyButton text={normalizedText} /> : null}
       </div>
 
-      {/* Loading dots */}
-      {!normalizedText && loading ? (
-        <div className="flex items-center gap-2 py-2">
-          <div className="w-2 h-2 rounded-full bg-violet-400 dot-1" />
-          <div className="w-2 h-2 rounded-full bg-pink-400 dot-2" />
-          <div className="w-2 h-2 rounded-full bg-violet-400 dot-3" />
-          <span className="text-xs font-semibold text-violet-500 ml-1">{loadingLabel}</span>
+      {normalizedText && onExport ? (
+        <div className="mb-3">
+          <ExportButtons onExport={onExport} />
         </div>
       ) : null}
 
-      {/* Text content */}
+      {!normalizedText && loading ? (
+        <div className="flex items-center gap-2 py-1">
+          <div className="w-2 h-2 rounded-full bg-brand-400 dot-1" />
+          <div className="w-2 h-2 rounded-full bg-brand-400 dot-2" />
+          <div className="w-2 h-2 rounded-full bg-brand-400 dot-3" />
+          <span className="text-xs font-medium text-brand-500">{loadingLabel}</span>
+        </div>
+      ) : null}
+
       {normalizedText ? (
-        <div ref={scrollRef} className="max-h-72 sm:max-h-80 overflow-y-auto pr-1 scrollbar-thin">
+        <div ref={scrollRef} className="max-h-80 overflow-y-auto pr-1 scrollbar-thin">
           <div className="space-y-2">
             {paragraphs.map((paragraph, i) => {
               const isLast = i === paragraphs.length - 1
               return (
                 <p
-                  key={`${label}-${i}`}
-                  className={`text-sm leading-6 whitespace-pre-wrap px-3 py-2 rounded-xl transition-all duration-300 ${
-                    accent ? 'text-slate-700' : 'text-slate-800'
-                  } ${loading && isLast ? 'bg-violet-50/60 border border-violet-200/60' : 'bg-white/50'}`}
+                  key={`${label}-${i}-${paragraph.slice(0, 16)}`}
+                  className={`text-sm leading-6 font-mono whitespace-pre-wrap px-2.5 py-1.5 rounded-lg transition-all duration-300 ${textColor} ${loading && isLast ? 'bg-indigo-500/10/70 border border-brand-500/30' : ''
+                    }`}
                 >
-                  {paragraph}
-                  {loading && isLast ? (
-                    <span className="inline-block w-0.5 h-[1em] bg-violet-500 ml-0.5 align-middle animate-pulse" />
-                  ) : null}
+                  <span>{paragraph}</span>
+                  {loading && isLast ? <span className="inline-block w-0.5 h-[1em] bg-slate-500 ml-0.5 align-middle animate-typing" /> : null}
                 </p>
               )
             })}
           </div>
         </div>
       ) : !loading ? (
-        <p className="text-xs text-slate-400 italic py-1">Output will appear here…</p>
+        <p className="text-xs text-slate-400 italic">Output will appear here...</p>
       ) : null}
     </section>
   )
@@ -145,78 +136,72 @@ export default function TranscriptPanel({
   const isEmpty = !original && !translation && !loading
 
   return (
-    <div className="space-y-4">
-      {/* Loading progress bar */}
+    <div className="space-y-3">
       {loading ? (
-        <div className="rounded-2xl border border-violet-200/60 bg-white/80 backdrop-blur-sm px-5 py-4 animate-fade-up shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 animate-fade-in shadow-glass-panel">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            <span className="text-sm font-bold text-violet-700">{status}</span>
-            <Zap size={14} className="text-pink-400 ml-auto animate-pulse" />
+            <div className="w-5 h-5 rounded-full border-2 border-brand-500/30 border-t-brand-500 animate-spin flex-shrink-0" />
+            <span className="text-sm font-semibold text-indigo-600">{status}</span>
+            <Zap size={14} className="text-slate-600 ml-auto animate-pulse" />
           </div>
-          <div className="h-2 rounded-full bg-violet-100 overflow-hidden">
+          <div className="h-1.5 rounded-full bg-slate-50 overflow-hidden">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-violet-500 via-purple-500 to-pink-500 relative overflow-hidden transition-all duration-700"
-              style={{ width: translation ? '92%' : original ? '64%' : '32%' }}
+              className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 relative overflow-hidden"
+              style={{ width: translation ? '92%' : original ? '64%' : '32%', transition: 'width 0.6s ease' }}
             >
-              <div className="absolute inset-0 bg-white/30 animate-shimmer-bar" />
+              <div className="absolute inset-0 bg-white/80/25 animate-progress" />
             </div>
           </div>
         </div>
       ) : null}
 
-      {/* Meta tags */}
       {(duration > 0 || detectedLang || sourceLabel) ? (
-        <div className="flex items-center gap-2 flex-wrap px-1">
+        <div className="flex items-center gap-2 px-1 animate-slide-up flex-wrap">
           {sourceLabel ? (
-            <span className="tag">
-              <FileText size={10} /> {sourceLabel}
+            <span className="tag bg-neon-cyan/10 text-indigo-600 border border-indigo-200">
+              <FileText size={10} /> Source: {sourceLabel}
             </span>
           ) : null}
           {duration > 0 ? (
-            <span className="tag">
+            <span className="tag bg-slate-50 text-indigo-600 border border-slate-200">
               <Clock size={10} /> {duration}s
             </span>
           ) : null}
           {detectedLang ? (
-            <span className="tag">
-              <Sparkles size={10} /> {detectedLang}
+            <span className="tag bg-slate-500/10 text-indigo-600 border border-slate-200">
+              <Sparkles size={10} /> Detected: {detectedLang}
             </span>
           ) : null}
         </div>
       ) : null}
 
-      {/* Transcript panel */}
       <Panel
         icon={FileText}
         label="Transcript"
         text={original}
         loading={loading && pipelineStep === 'transcribe' && !original}
-        loadingLabel="Transcribing…"
+        loadingLabel="Transcribing..."
         onExport={onExportOriginal}
       />
-
-      {/* Translation panel */}
       {action !== 'transcript' ? (
         <Panel
           icon={Languages}
           label="Translation"
           text={translation}
           loading={loading && action === 'translate' && pipelineStep === 'translate'}
-          loadingLabel="Translating…"
+          loadingLabel="Translating..."
           accent
           onExport={onExportTranslation}
         />
       ) : null}
 
-      {/* Empty state */}
       {isEmpty ? (
-        <div className="text-center py-14 animate-fade-up">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-100 to-pink-100 border border-violet-200/60 flex items-center justify-center mx-auto mb-4 shadow-md shadow-violet-100 animate-float">
-            <FileText size={26} className="text-violet-400" />
+        <div className="text-center py-16 animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mx-auto mb-4 animate-float">
+            <FileText size={24} className="text-slate-600" />
           </div>
-          <p className="text-sm font-semibold text-slate-500">Upload an audio file to begin</p>
-          <p className="text-xs text-slate-400 mt-1.5">Transcript and translation will stream here</p>
+          <p className="text-sm font-medium text-slate-500">Upload audio or paste a source URL to begin</p>
+          <p className="text-xs text-slate-400 mt-1">Transcript and translation will stream here in readable paragraph form</p>
         </div>
       ) : null}
     </div>
