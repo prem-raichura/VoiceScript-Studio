@@ -144,10 +144,10 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
           ${dragging
             ? 'border-brand-400 bg-slate-50 scale-[1.02]'
             : file && !uploading
-            ? 'border-green-500/30 bg-gradient-to-br from-green-50 to-emerald-50'
-            : uploading
-            ? 'border-indigo-400/40 bg-gradient-to-br from-indigo-50 to-violet-50'
-            : 'border-brand-500/30 bg-gradient-to-br from-white to-brand-50/40 hover:border-brand-400 hover:from-brand-50 hover:to-indigo-50 hover:scale-[1.01]'}`}
+              ? 'border-green-500/30 bg-gradient-to-br from-green-50 to-emerald-50'
+              : uploading
+                ? 'border-indigo-400/40 bg-gradient-to-br from-indigo-50 to-violet-50'
+                : 'border-brand-500/30 bg-gradient-to-br from-white to-brand-50/40 hover:border-brand-400 hover:from-brand-50 hover:to-indigo-50 hover:scale-[1.01]'}`}
       >
         {/* ── Uploading state ── */}
         {uploading ? (

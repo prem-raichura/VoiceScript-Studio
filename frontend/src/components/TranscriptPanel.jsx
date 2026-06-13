@@ -13,11 +13,10 @@ function CopyButton({ text }) {
   return (
     <button
       onClick={copy}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95 ${
-        copied
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95 ${copied
           ? 'bg-green-500/20 text-green-400 border border-green-200'
           : 'bg-slate-50 text-brand-500 border border-slate-200 hover:bg-indigo-500/10'
-      }`}
+        }`}
     >
       {copied ? <Check size={11} /> : <Copy size={11} />}
       {copied ? 'Copied' : 'Copy'}
@@ -104,9 +103,8 @@ function Panel({ icon: Icon, label, text, loading, loadingLabel, accent, onExpor
               return (
                 <p
                   key={`${label}-${i}-${paragraph.slice(0, 16)}`}
-                  className={`text-sm leading-6 font-mono whitespace-pre-wrap px-2.5 py-1.5 rounded-lg transition-all duration-300 ${textColor} ${
-                    loading && isLast ? 'bg-indigo-500/10/70 border border-brand-500/30' : ''
-                  }`}
+                  className={`text-sm leading-6 font-mono whitespace-pre-wrap px-2.5 py-1.5 rounded-lg transition-all duration-300 ${textColor} ${loading && isLast ? 'bg-indigo-500/10/70 border border-brand-500/30' : ''
+                    }`}
                 >
                   <span>{paragraph}</span>
                   {loading && isLast ? <span className="inline-block w-0.5 h-[1em] bg-slate-500 ml-0.5 align-middle animate-typing" /> : null}

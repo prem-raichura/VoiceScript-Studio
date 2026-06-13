@@ -7,13 +7,10 @@ import {
   Download,
   FileText,
   Languages,
-  Link2,
-  Loader2,
   Mic,
   RefreshCw,
   RotateCcw,
   Sparkles,
-  X,
 } from 'lucide-react'
 import Uploader from './components/Uploader'
 import TranscriptPanel from './components/TranscriptPanel'
@@ -24,20 +21,16 @@ const LARGE_FILE_THRESHOLD_BYTES = 1 * 1024 * 1024
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 const PIPELINE_STEPS = [
-  { id: 'input', label: '1. Input Received' },
-  { id: 'detect', label: '2. Source Detection' },
-  { id: 'extract', label: '3. Audio Extraction (if needed)' },
-  { id: 'transcribe', label: '4. Transcription' },
-  { id: 'translate', label: '5. Translation' },
-  { id: 'output', label: '6. Output Generated' },
+  { id: 'transcribe', label: '1. Transcription' },
+  { id: 'translate', label: '2. Translation' },
+  { id: 'output', label: '3. Output Generated' },
 ]
 
-const STEP_RANK = { idle: 0, input: 1, detect: 2, extract: 3, transcribe: 4, translate: 5, output: 6, error: 0 }
+const STEP_RANK = { idle: 0, transcribe: 1, translate: 2, output: 3, error: 0 }
 
 const SOURCE_BADGES = {
   drive_audio: 'Drive Audio',
   drive_video: 'Drive Video',
-  youtube_video: 'YouTube',
   direct_audio: 'Direct Audio',
   direct_video: 'Direct Video',
 }
@@ -251,7 +244,6 @@ export default function App() {
   const [targetLang, setTargetLang] = useState('en')
 
   const [loading, setLoading] = useState(false)
-  const [ingesting, setIngesting] = useState(false)
   const [status, setStatus] = useState('')
   const [pipelineStep, setPipelineStep] = useState('idle')
 
@@ -268,19 +260,16 @@ export default function App() {
   const [lastCloudinaryUrl, setLastCloudinaryUrl] = useState(null)
   const [uploaderKey, setUploaderKey] = useState(0)
 
-  const [sourceInput, setSourceInput] = useState('')
   const [sourceInfo, setSourceInfo] = useState(null)
-  const [sourceStatusMessage, setSourceStatusMessage] = useState('')
 
   const abortRef = useRef(null)
-  const urlAbortRef = useRef(null)
 
   const selectedFileForUploader = useMemo(
     () => (lastBlob ? { name: lastFilename, size: lastBlob.size } : null),
     [lastBlob, lastFilename],
   )
 
-  const busy = loading || ingesting
+  const busy = loading
   const hasOutput = Boolean((original || '').trim() || (translation || '').trim())
   const hasExportableData = Boolean(hasOutput || history.length)
   const sourceLabel = sourceInfo?.label || ''
@@ -304,16 +293,12 @@ export default function App() {
 
   const resetAll = useCallback(() => {
     clearResults()
-    urlAbortRef.current?.abort()
-    setIngesting(false)
     setLastBlob(null)
     setLastFilename('audio.webm')
     setLastAction('translate')
     setLastCloudinaryUrl(null)
     setUploaderKey((k) => k + 1)
-    setSourceInput('')
     setSourceInfo(null)
-    setSourceStatusMessage('')
   }, [clearResults])
 
   const appendHistory = useCallback((entryOriginal, entryTranslation) => {
@@ -691,110 +676,7 @@ export default function App() {
     }
   }, [appendHistory, setPipeline, targetLang])
 
-  const detectSource = useCallback(async (url, signal) => {
-    const res = await fetch(`${API_BASE}/api/detect-source`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-      signal,
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || 'Could not detect source type.')
-    return data
-  }, [])
 
-  const fetchAudioFromInput = useCallback(async () => {
-    const url = sourceInput.trim()
-    if (!url || busy) {
-      if (!url) setError('Please paste a source URL.')
-      return
-    }
-
-    setError('')
-    setIngesting(true)
-    setPipeline('input', 'Input Received')
-    setTimeout(() => setPipeline('detect', 'Detecting Source...'), 20)
-    setSourceStatusMessage('Detecting source...')
-
-    const controller = new AbortController()
-    urlAbortRef.current = controller
-
-    try {
-      const detected = await detectSource(url, controller.signal)
-      const label = detected.label || SOURCE_BADGES[detected.source_type] || 'Detected Source'
-      setSourceInfo({ ...detected, label })
-      setSourceStatusMessage(`Detected: ${label}`)
-      toast.success(`Source detected: ${label}`, { duration: 2000 })
-
-      if (detected.requires_extraction) {
-        setPipeline('extract', 'Extracting Audio...')
-      } else {
-        setPipeline('transcribe', 'Preparing audio...')
-      }
-
-      const startRes = await fetch(`${API_BASE}/api/extract-audio-url`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-        signal: controller.signal,
-      })
-      const startData = await startRes.json().catch(() => ({}))
-      if (!startRes.ok) throw new Error(startData.error || 'Could not start source processing.')
-
-      const jobId = startData.job_id
-      if (!jobId) throw new Error('Missing processing job id.')
-
-      let ready = false
-      while (!ready) {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-        const statusRes = await fetch(`${API_BASE}/api/extract-audio-url/status/${jobId}`, { signal: controller.signal })
-        const statusData = await statusRes.json().catch(() => ({}))
-        if (!statusRes.ok) throw new Error(statusData.error || 'Could not read source processing status.')
-
-        if (statusData.source_label) {
-          setSourceInfo((prev) => ({ ...(prev || {}), label: statusData.source_label, source_type: statusData.source_type || prev?.source_type }))
-        }
-
-        const stage = statusData.status || 'queued'
-        const message = statusData.message || ''
-        if (stage === 'detecting') {
-          if (detected.requires_extraction) setPipeline('detect', message || 'Detecting Source...')
-          else setPipeline('transcribe', message || 'Preparing audio...')
-        }
-        if (stage === 'fetching' || stage === 'extracting') {
-          if (detected.requires_extraction) setPipeline('extract', message || 'Extracting Audio...')
-          else setPipeline('transcribe', message || 'Fetching audio...')
-        }
-        setSourceStatusMessage(message)
-
-        if (stage === 'error') throw new Error(statusData.error || 'Source processing failed.')
-        if (stage === 'ready') ready = true
-      }
-
-      const downloadRes = await fetch(`${API_BASE}/api/extract-audio-url/download/${jobId}`, { signal: controller.signal })
-      if (!downloadRes.ok) {
-        const payload = await downloadRes.json().catch(() => ({}))
-        throw new Error(payload.error || 'Could not download prepared audio.')
-      }
-
-      const filename = parseDispositionFilename(downloadRes.headers.get('content-disposition'))
-      const blob = await downloadRes.blob()
-      setLastBlob(blob)
-      setLastFilename(filename)
-      setPipeline('transcribe', 'Ready to Transcribe')
-      setSourceStatusMessage(`Audio ready: ${filename}`)
-      toast.success('Audio extracted — ready to transcribe!')
-    } catch (err) {
-      if (err.name === 'AbortError') return
-      toast.error(err.message?.slice(0, 80) || 'Source processing failed.')
-      setError(err.message || 'Source processing failed.')
-      setPipelineStep('error')
-      setSourceStatusMessage(err.message || 'Failed')
-    } finally {
-      setIngesting(false)
-      setStatus('')
-    }
-  }, [busy, detectSource, setPipeline, sourceInput])
 
   const handleAudioUpload = useCallback((blob, filename = 'audio.webm', cloudinaryUrl = null) => {
     setLastBlob(blob)
@@ -1062,55 +944,13 @@ export default function App() {
         {/* Dashboard Grid Container */}
         <div className="p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 w-full max-w-7xl mx-auto">
           
-          {/* Top Control Panel: Uploader & Input (Full Width) */}
+          {/* Top Control Panel: Uploader (Full Width) */}
           <section className="glass-panel p-5 xl:col-span-12 flex flex-col lg:flex-row gap-6 items-stretch">
-            {/* Input Area */}
+            {/* Heading */}
             <div className="flex-1 w-full space-y-4 flex flex-col justify-center">
               <div>
                 <h1 className="text-2xl font-black tracking-tight text-slate-900">Input Pipeline</h1>
-                <p className="text-sm text-slate-500 mt-1">Paste a link or upload an audio file to begin.</p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                  Source URL
-                </label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1 min-w-0">
-                    <Link2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-600" />
-                    <input
-                      value={sourceInput}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setSourceInput(val)
-                        if (!val.trim()) {
-                          resetAll()
-                        }
-                      }}
-                      disabled={busy}
-                      placeholder="Paste Google Drive, YouTube, or direct audio link"
-                      className="w-full rounded-xl border border-white/80 bg-white/80 pl-9 pr-10 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent disabled:opacity-60"
-                    />
-                    {sourceInput ? (
-                      <button
-                        onClick={() => {
-                          setSourceInput('')
-                          resetAll()
-                        }}
-                        disabled={busy}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-50"
-                        title="Clear input"
-                      >
-                        <X size={14} />
-                      </button>
-                    ) : null}
-                  </div>
-                  <button onClick={fetchAudioFromInput} disabled={busy || !sourceInput.trim()} className="btn-brand px-4 py-2.5 text-xs">
-                    {ingesting ? <Loader2 size={14} className="animate-spin" /> : null}
-                    {ingesting ? 'Working' : 'Process'}
-                  </button>
-                </div>
-                {sourceStatusMessage ? <p className="text-xs text-slate-500 mt-2">{sourceStatusMessage}</p> : null}
+                <p className="text-sm text-slate-500 mt-1">Upload an audio file to begin transcription.</p>
               </div>
             </div>
 
