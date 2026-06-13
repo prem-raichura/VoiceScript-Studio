@@ -139,7 +139,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
         onDrop={onDrop}
         onClick={() => !disabled && !uploading && inputRef.current.click()}
         className={`relative rounded-2xl border-2 border-dashed transition-all duration-300 cursor-pointer
-          flex flex-col items-center justify-center gap-3 py-10 px-6 text-center select-none
+          flex flex-col items-center justify-center gap-2 py-6 px-5 text-center select-none
           ${disabled || uploading ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}
           ${dragging
             ? 'border-brand-400 bg-slate-50 scale-[1.02]'
@@ -152,8 +152,8 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
         {/* ── Uploading state ── */}
         {uploading ? (
           <>
-            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center">
-              <Server size={26} className="text-indigo-500 animate-pulse" />
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+              <Server size={20} className="text-indigo-500 animate-pulse" />
             </div>
             <div className="animate-fade-in space-y-2 w-full max-w-[220px]">
               <p className="font-semibold text-sm text-slate-800">{uploadStatus}</p>
@@ -171,8 +171,8 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
         ) : file ? (
           <>
             <div className="relative">
-              <div className="w-14 h-14 rounded-2xl bg-green-500/20 flex items-center justify-center animate-scale-in">
-                <CheckCircle2 size={28} className="text-green-500" />
+              <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center animate-scale-in">
+                <CheckCircle2 size={22} className="text-green-500" />
               </div>
             </div>
             <div className="animate-fade-in space-y-1">
@@ -189,11 +189,11 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
           </>
         ) : (
           <>
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300
               ${dragging
                 ? 'bg-slate-500 text-slate-900 scale-110 shadow-brand'
                 : 'bg-slate-50 text-indigo-600 group-hover:bg-indigo-500/10'}`}>
-              <Upload size={22} className={dragging ? 'animate-bounce' : ''} />
+              <Upload size={18} className={dragging ? 'animate-bounce' : ''} />
             </div>
             <div>
               <p className="font-semibold text-sm text-slate-800">

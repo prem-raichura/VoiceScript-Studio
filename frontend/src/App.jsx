@@ -1,16 +1,21 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Toaster, toast } from 'react-hot-toast'
 import {
   AlertCircle,
   CheckCircle2,
   Circle,
   Download,
+  ExternalLink,
   FileText,
+  Globe,
   Languages,
+  Link2,
+  Loader2,
   Mic,
   RefreshCw,
   RotateCcw,
   Sparkles,
+  X,
 } from 'lucide-react'
 import Uploader from './components/Uploader'
 import TranscriptPanel from './components/TranscriptPanel'
@@ -261,8 +266,16 @@ export default function App() {
   const [uploaderKey, setUploaderKey] = useState(0)
 
   const [sourceInfo, setSourceInfo] = useState(null)
+  const [sourceStatusMessage, setSourceStatusMessage] = useState('')
+
+  // ── URL input pipeline state ──
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [sourceDetecting, setSourceDetecting] = useState(false)
+  const [sourceExtracting, setSourceExtracting] = useState(false)
+  const [sourceExtractStatus, setSourceExtractStatus] = useState('')
 
   const abortRef = useRef(null)
+  const extractPollRef = useRef(null)
 
   const selectedFileForUploader = useMemo(
     () => (lastBlob ? { name: lastFilename, size: lastBlob.size } : null),
@@ -299,6 +312,12 @@ export default function App() {
     setLastCloudinaryUrl(null)
     setUploaderKey((k) => k + 1)
     setSourceInfo(null)
+    setSourceStatusMessage('')
+    setSourceUrl('')
+    setSourceDetecting(false)
+    setSourceExtracting(false)
+    setSourceExtractStatus('')
+    if (extractPollRef.current) clearInterval(extractPollRef.current)
   }, [clearResults])
 
   const appendHistory = useCallback((entryOriginal, entryTranslation) => {
@@ -690,6 +709,10 @@ export default function App() {
     })
     setPipeline('transcribe', 'Ready to Transcribe')
     setSourceStatusMessage(`Audio selected: ${filename}`)
+    setSourceUrl('')
+    setSourceDetecting(false)
+    setSourceExtracting(false)
+    setSourceExtractStatus('')
     toast.success(`File loaded: ${filename}`, { duration: 2000 })
   }, [])
 
@@ -697,7 +720,140 @@ export default function App() {
     setLastBlob(null)
     setLastFilename('audio.webm')
     setLastCloudinaryUrl(null)
+    setSourceStatusMessage('')
   }, [])
+
+  // ── URL Source Detection & Audio Extraction ────────────────────────────────
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => { if (extractPollRef.current) clearInterval(extractPollRef.current) }
+  }, [])
+
+  const handleDetectAndExtract = useCallback(async (url) => {
+    const trimmed = (url || '').trim()
+    if (!trimmed) { toast.error('Please enter a URL'); return }
+
+    // Clear previous state
+    clearResults()
+    setLastBlob(null)
+    setLastFilename('audio.webm')
+    setLastCloudinaryUrl(null)
+    setSourceInfo(null)
+    setSourceStatusMessage('')
+    setSourceExtracting(false)
+    setSourceExtractStatus('')
+    if (extractPollRef.current) clearInterval(extractPollRef.current)
+
+    // Step 1: Detect source
+    setSourceDetecting(true)
+    setSourceStatusMessage('Detecting source…')
+
+    let detected
+    try {
+      const res = await fetch(`${API_BASE}/api/detect-source`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: trimmed }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || `Detection failed (${res.status})`)
+      }
+      detected = await res.json()
+    } catch (err) {
+      setSourceDetecting(false)
+      setSourceStatusMessage('')
+      toast.error(err.message?.slice(0, 100) || 'Source detection failed')
+      return
+    }
+
+    setSourceDetecting(false)
+    setSourceInfo({
+      source_type: detected.source_type,
+      label: detected.label,
+      kind: detected.kind,
+      requires_extraction: detected.requires_extraction,
+    })
+    setSourceStatusMessage(`Detected: ${detected.label}`)
+    toast.success(`Source detected: ${detected.label}`, { duration: 2000 })
+
+    // Step 2: Extract audio
+    setSourceExtracting(true)
+    setSourceExtractStatus('Starting extraction…')
+
+    let jobId
+    try {
+      const res = await fetch(`${API_BASE}/api/extract-audio-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: trimmed }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || `Extraction failed (${res.status})`)
+      }
+      const data = await res.json()
+      jobId = data.job_id
+    } catch (err) {
+      setSourceExtracting(false)
+      setSourceExtractStatus('')
+      setSourceStatusMessage(`Detection OK, but extraction failed`)
+      toast.error(err.message?.slice(0, 100) || 'Audio extraction failed')
+      return
+    }
+
+    // Step 3: Poll for extraction completion
+    extractPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/extract-audio-url/status/${jobId}`)
+        if (!res.ok) throw new Error('Polling failed')
+        const status = await res.json()
+
+        setSourceExtractStatus(status.message || 'Processing…')
+
+        if (status.status === 'ready') {
+          clearInterval(extractPollRef.current)
+          extractPollRef.current = null
+          setSourceExtractStatus('Downloading audio…')
+
+          // Download the extracted audio blob
+          try {
+            const dlRes = await fetch(`${API_BASE}/api/extract-audio-url/download/${jobId}`)
+            if (!dlRes.ok) throw new Error('Download failed')
+
+            const disposition = dlRes.headers.get('content-disposition')
+            const filename = parseDispositionFilename(disposition)
+            const blob = await dlRes.blob()
+
+            setLastBlob(blob)
+            setLastFilename(filename)
+            setLastCloudinaryUrl(null)
+            setSourceExtracting(false)
+            setSourceExtractStatus('')
+            setSourceStatusMessage(`Audio ready: ${filename}`)
+            setPipeline('transcribe', 'Ready to Transcribe')
+            toast.success(`Audio extracted: ${filename}`, { duration: 3000 })
+          } catch (dlErr) {
+            setSourceExtracting(false)
+            setSourceExtractStatus('')
+            setSourceStatusMessage('Extraction completed but download failed')
+            toast.error(dlErr.message?.slice(0, 100) || 'Audio download failed')
+          }
+        } else if (status.status === 'error') {
+          clearInterval(extractPollRef.current)
+          extractPollRef.current = null
+          setSourceExtracting(false)
+          setSourceExtractStatus('')
+          setSourceStatusMessage('Audio extraction failed')
+          toast.error(status.error || 'Audio extraction failed')
+        }
+      } catch (err) {
+        // Network error during poll — keep trying
+        console.warn('[extract-poll] error:', err.message)
+      }
+    }, 2000)
+  }, [clearResults, setPipeline])
 
   const handleTranscript = useCallback(() => {
     if (!lastBlob || busy) return
@@ -944,23 +1100,68 @@ export default function App() {
         {/* Dashboard Grid Container */}
         <div className="p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 w-full max-w-7xl mx-auto">
           
-          {/* Top Control Panel: Uploader (Full Width) */}
-          <section className="glass-panel p-5 xl:col-span-12 flex flex-col lg:flex-row gap-6 items-stretch">
-            {/* Heading */}
-            <div className="flex-1 w-full space-y-4 flex flex-col justify-center">
-              <div>
-                <h1 className="text-2xl font-black tracking-tight text-slate-900">Input Pipeline</h1>
-                <p className="text-sm text-slate-500 mt-1">Upload an audio file to begin transcription.</p>
-              </div>
+          {/* Top Control Panel: Input Pipeline (Full Width) */}
+          <section className="glass-panel p-4 lg:p-5 xl:col-span-12">
+            <div className="mb-3">
+              <h1 className="text-base font-black tracking-tight text-slate-900">Input Pipeline</h1>
+              <p className="text-xs text-slate-500 mt-0.5">Paste a link or upload an audio file to begin.</p>
             </div>
 
-            {/* Separator */}
-            <div className="hidden lg:block w-px bg-white/10"></div>
+            <div className="flex flex-col md:flex-row gap-3 md:gap-5 items-center">
+              {/* ── Left: URL Input ── */}
+              <div className="flex-1 w-full space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Source URL</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <Link2 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input
+                      type="url"
+                      value={sourceUrl}
+                      onChange={(e) => setSourceUrl(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !busy && !sourceDetecting && !sourceExtracting) handleDetectAndExtract(sourceUrl) }}
+                      placeholder="https://drive.google.com/file/d/..."
+                      disabled={busy || sourceDetecting || sourceExtracting}
+                      className="input-url w-full"
+                    />
+                    {sourceUrl && !sourceDetecting && !sourceExtracting && (
+                      <button
+                        onClick={() => { setSourceUrl(''); setSourceStatusMessage(''); setSourceInfo(null) }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleDetectAndExtract(sourceUrl)}
+                    disabled={busy || sourceDetecting || sourceExtracting || !sourceUrl.trim()}
+                    className={`inline-flex items-center gap-2 py-2 px-4 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0 transition-all duration-200 ${
+                      sourceDetecting || sourceExtracting
+                        ? 'bg-violet-500 text-white shadow-lg shadow-violet-500/25'
+                        : 'btn-brand'
+                    }`}
+                  >
+                    {sourceDetecting || sourceExtracting ? (
+                      <><Loader2 size={14} className="animate-spin" /> <span>Working</span></>
+                    ) : (
+                      <><ExternalLink size={14} /> <span>Extract</span></>
+                    )}
+                  </button>
+                </div>
 
-            {/* Uploader */}
-            <div className="flex-1 w-full flex items-center justify-center">
-              <div className="w-full max-w-sm">
-                <Uploader key={uploaderKey} onAudioReady={handleAudioUpload} disabled={busy} selectedFile={selectedFileForUploader} onClearSelected={clearSelectedAudio} />
+                {/* Status line below input */}
+                {sourceStatusMessage && (
+                  <p className="text-xs text-slate-500 pl-1 animate-fade-in flex items-center gap-1.5">
+                    {sourceExtracting && <Loader2 size={11} className="animate-spin text-violet-500" />}
+                    {lastBlob && sourceInfo && !sourceExtracting && <CheckCircle2 size={11} className="text-emerald-500" />}
+                    {sourceStatusMessage}
+                  </p>
+                )}
+              </div>
+
+              {/* ── Right: File Upload ── */}
+              <div className="w-full md:w-auto md:min-w-[260px]">
+                <Uploader key={uploaderKey} onAudioReady={handleAudioUpload} disabled={busy || sourceExtracting} selectedFile={selectedFileForUploader} onClearSelected={clearSelectedAudio} />
               </div>
             </div>
           </section>
