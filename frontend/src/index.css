@@ -101,6 +101,7 @@
   .btn-brand:hover {
     box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4), 0 1px 0 rgba(255,255,255,0.2) inset;
     transform: translateY(-1px);
+    color: #000000;
   }
   .btn-brand:active {
     transform: scale(0.97) translateY(0);

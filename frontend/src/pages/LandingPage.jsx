@@ -268,7 +268,7 @@ export default function LandingPage({ onStart }) {
 
         {/* Sub */}
         <p className="animate-fade-up-delay2 max-w-xl text-lg text-slate-500 leading-relaxed mb-10 text-balance">
-          Turn any audio file into accurate text in seconds. Translate to 50+ languages
+          Turn any audio file into accurate text in seconds. Translate to 12+ languages
           and export in the format you need — all for free.
         </p>
 

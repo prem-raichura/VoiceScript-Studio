@@ -1191,10 +1191,10 @@ export default function App() {
             <div className="glass-panel p-5 space-y-4">
               <div className="flex flex-col gap-3">
                 <button onClick={handleTranscript} disabled={busy || !lastBlob} className="w-full btn-ghost py-3 text-sm justify-center">
-                  <FileText size={16} /> Run Transcript
+                  <FileText size={16} /> <span>Run Transcript</span>
                 </button>
                 <button onClick={handleTranslate} disabled={busy || (!lastBlob && !(original || '').trim())} className="w-full btn-brand py-3 text-sm justify-center">
-                  <Languages size={16} /> Run Translate
+                  <Languages size={16} /> <span>Run Translate</span>
                 </button>
               </div>
 
