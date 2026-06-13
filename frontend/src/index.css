@@ -203,6 +203,40 @@
   .input-select:hover { border-color: rgba(124, 58, 237, 0.25); }
   .input-select option { background-color: #ffffff; color: #0f172a; }
 
+  /* ── URL input ── */
+  .input-url {
+    display: block;
+    width: 100%;
+    border-radius: 0.875rem;
+    border: 1.5px solid rgba(124, 58, 237, 0.12);
+    background-color: rgba(255, 255, 255, 0.75);
+    padding: 0.625rem 2.25rem 0.625rem 2.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: #334155;
+    font-weight: 500;
+    backdrop-filter: blur(12px);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .input-url::placeholder {
+    color: #94a3b8;
+    font-weight: 400;
+  }
+  .input-url:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2.5px #7c3aed;
+    border-color: transparent;
+    background-color: #ffffff;
+  }
+  .input-url:hover:not(:focus):not(:disabled) {
+    border-color: rgba(124, 58, 237, 0.25);
+  }
+  .input-url:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
   /* ── Misc ── */
   .shimmer-bg {
     background: linear-gradient(90deg, rgba(109, 40, 217, 0.03) 25%, rgba(109, 40, 217, 0.07) 50%, rgba(109, 40, 217, 0.03) 75%);

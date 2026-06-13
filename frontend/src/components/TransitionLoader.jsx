@@ -96,30 +96,28 @@ function MainSkeleton() {
       <div className="p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 w-full max-w-7xl mx-auto">
 
         {/* ── Upload panel — glass-panel p-5 xl:col-span-12 flex lg:flex-row gap-6 ── */}
-        <section className="glass-panel p-5 xl:col-span-12 flex flex-col lg:flex-row gap-6 items-stretch">
-          {/* Left: heading text */}
-          <div className="flex-1 w-full space-y-4 flex flex-col justify-center">
-            <div className="space-y-2">
-              {/* h1 text-2xl font-black */}
-              <Bone className="h-7 w-40 rounded-lg" />
-              {/* p text-sm */}
-              <Bone className="h-[13px] w-64 rounded-md" />
-            </div>
+        <section className="glass-panel p-4 lg:p-5 xl:col-span-12">
+          {/* Title */}
+          <div className="mb-3 space-y-1.5">
+            <Bone className="h-5 w-32 rounded-lg" />
+            <Bone className="h-[11px] w-56 rounded-md" />
           </div>
 
-          {/* Separator */}
-          <div className="hidden lg:block w-px bg-white/10" />
+          <div className="flex flex-col md:flex-row gap-3 md:gap-5 items-center">
+            {/* Left: URL input skeleton */}
+            <div className="w-full md:basis-3/5 md:flex-none space-y-1.5">
+              <Bone className="h-[10px] w-20 rounded-md" />
+              <div className="flex items-center gap-2">
+                <Bone className="h-10 flex-1 rounded-xl" />
+                <Bone className="h-9 w-24 rounded-full" />
+              </div>
+            </div>
 
-          {/* Right: Uploader — w-full max-w-sm */}
-          <div className="flex-1 w-full flex items-center justify-center">
-            <div className="w-full max-w-sm space-y-3">
-              {/* Drop zone — rounded-2xl border-2 border-dashed py-10 px-6 */}
-              <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 flex flex-col items-center justify-center gap-3 py-10 px-6">
-                {/* Upload icon — w-14 h-14 rounded-2xl */}
-                <Bone className="w-14 h-14 rounded-2xl" />
-                {/* "Drag & drop" text */}
+            {/* Right: Uploader skeleton */}
+            <div className="w-full md:basis-2/5 md:flex-none">
+              <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 flex flex-col items-center justify-center gap-2 py-10 px-5">
+                <Bone className="w-10 h-10 rounded-xl" />
                 <Bone className="h-[13px] w-48 rounded-md" />
-                {/* subtext */}
                 <Bone className="h-[11px] w-36 rounded-md" />
               </div>
             </div>
