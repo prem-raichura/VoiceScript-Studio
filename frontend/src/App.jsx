@@ -317,6 +317,12 @@ export default function App() {
   }, [])
 
   const resetAll = useCallback(() => {
+    if (lastCloudinaryUrl && lastCloudinaryUrl.startsWith('session://')) {
+      const sessionId = lastCloudinaryUrl.replace('session://', '')
+      fetch(`${API_BASE}/api/upload-session/${sessionId}`, { method: 'DELETE' }).catch((err) =>
+        console.error('[cleanup] Failed to delete session on backend:', err)
+      )
+    }
     clearResults()
     setLastBlob(null)
     setLastFilename('audio.webm')
@@ -330,7 +336,7 @@ export default function App() {
     setSourceExtracting(false)
     setSourceExtractStatus('')
     if (extractPollRef.current) clearInterval(extractPollRef.current)
-  }, [clearResults])
+  }, [clearResults, lastCloudinaryUrl])
 
   const appendHistory = useCallback((entryOriginal, entryTranslation) => {
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -495,11 +501,13 @@ export default function App() {
             finalOriginal += (finalOriginal ? ' ' : '') + (data.text || '')
             setOriginal(finalOriginal)
           } else if (data.type === 'error') {
+            setLastCloudinaryUrl(null)
             throw new Error(data.message || 'Processing failed.')
           } else if (data.type === 'done') {
             setPipeline('output', 'Output Generated')
             setLoading(false)
             setStatus('')
+            setLastCloudinaryUrl(null)
             if (finalOriginal || finalTranslation) {
               appendHistory(finalOriginal, finalTranslation)
               toast.success(action === 'transcript' ? 'Transcription complete!' : 'Transcription & translation complete!')
@@ -508,6 +516,7 @@ export default function App() {
         }
       }
     } catch (err) {
+      setLastCloudinaryUrl(null)
       if (err.name !== 'AbortError') {
         toast.error(err.message?.slice(0, 80) || 'Processing failed.')
         setError(err.message || 'Processing failed.')
@@ -710,6 +719,12 @@ export default function App() {
 
 
   const handleAudioUpload = useCallback((blob, filename = 'audio.webm', cloudinaryUrl = null) => {
+    if (lastCloudinaryUrl && lastCloudinaryUrl.startsWith('session://')) {
+      const oldSessionId = lastCloudinaryUrl.replace('session://', '')
+      fetch(`${API_BASE}/api/upload-session/${oldSessionId}`, { method: 'DELETE' }).catch((err) =>
+        console.error('[cleanup] Failed to delete old session:', err)
+      )
+    }
     setLastBlob(blob)
     setLastFilename(filename)
     setLastCloudinaryUrl(cloudinaryUrl)
@@ -726,14 +741,20 @@ export default function App() {
     setSourceExtracting(false)
     setSourceExtractStatus('')
     toast.success(`File loaded: ${filename}`, { duration: 2000 })
-  }, [])
+  }, [lastCloudinaryUrl])
 
   const clearSelectedAudio = useCallback(() => {
+    if (lastCloudinaryUrl && lastCloudinaryUrl.startsWith('session://')) {
+      const sessionId = lastCloudinaryUrl.replace('session://', '')
+      fetch(`${API_BASE}/api/upload-session/${sessionId}`, { method: 'DELETE' }).catch((err) =>
+        console.error('[cleanup] Failed to delete session on backend:', err)
+      )
+    }
     setLastBlob(null)
     setLastFilename('audio.webm')
     setLastCloudinaryUrl(null)
     setSourceStatusMessage('')
-  }, [])
+  }, [lastCloudinaryUrl])
 
   // ── URL Source Detection & Audio Extraction ────────────────────────────────
 

@@ -74,6 +74,7 @@ apiRouter.post("/transcribe-session", apiLimiter, transcribeController.transcrib
 // Chunked file upload routes (no Cloudinary needed)
 apiRouter.post("/upload-init", apiLimiter, uploadController.initSession);
 apiRouter.post("/upload-chunk", uploadController.uploadChunk); // No rate limit — called many times per file
+apiRouter.delete("/upload-session/:session_id", apiLimiter, uploadController.deleteSessionRoute);
 
 apiRouter.post("/translate-text", apiLimiter, translateController.translateText);
 

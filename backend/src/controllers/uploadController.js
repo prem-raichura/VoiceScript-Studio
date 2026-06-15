@@ -88,6 +88,13 @@ exports.assembleSession = (sessionId, filename) => {
 
 exports.cleanupSession = cleanupSession;
 
+exports.deleteSessionRoute = (req, res) => {
+  const { session_id } = req.params;
+  if (!session_id) return res.status(400).json({ error: "session_id is required" });
+  cleanupSession(session_id);
+  res.json({ ok: true });
+};
+
 function cleanupSession(sessionId) {
   const session = uploadSessions.get(sessionId);
   if (session) {
@@ -96,3 +103,4 @@ function cleanupSession(sessionId) {
     console.log(`[upload] Session cleaned up: ${sessionId}`);
   }
 }
+
