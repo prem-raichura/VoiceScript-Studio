@@ -138,7 +138,7 @@ async function detectSource(urlStr) {
   const ext  = guessExtFromUrl(urlStr);
 
   if (["youtube.com", "youtu.be"].includes(host) || host.endsWith(".youtube.com"))
-    return { source_type: "youtube_video", label: "YouTube Video", kind: "video", requires_extraction: true };
+    return { source_type: "unsupported", label: "Unsupported Source", kind: "unknown", requires_extraction: false };
 
   if (host === "drive.google.com" || host.endsWith(".drive.google.com")) {
     const { type, label, kind } = await detectDriveMediaKind(urlStr);

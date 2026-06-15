@@ -10,7 +10,7 @@ const {
   sanitizeFilename,
   downloadVideoFile,
   downloadDirectAudioFile
-} = require("../utils/ytdlpHelper");
+} = require("../utils/urlDownloadHelper");
 const { getFfmpegExecutable, extractAudioWithFfmpeg } = require("../utils/ffmpegHelper");
 
 const URL_AUDIO_JOBS = new Map();
@@ -118,7 +118,7 @@ exports.extractAudioUrl = async (req, res) => {
   }
 
   if (detected.source_type === "unsupported") {
-    return res.status(400).json({ error: "Unsupported URL. Use Google Drive, YouTube, or direct audio links." });
+    return res.status(400).json({ error: "Unsupported URL. Use Google Drive or direct audio links." });
   }
 
   const jobId = uuidv4().replace(/-/g, "");
