@@ -14,8 +14,8 @@ function CopyButton({ text }) {
     <button
       onClick={copy}
       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95 ${copied
-          ? 'bg-mud-moss/20 text-green-400 border border-green-200'
-          : 'bg-mud-light text-mud-base border border-mud-base/30 hover:bg-mud-dark/10'
+          ? 'bg-emerald-50 text-green-400 border border-green-200'
+          : 'bg-slate-50 text-teal-600 border border-slate-200 hover:bg-slate-900/10'
         }`}
     >
       {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -31,7 +31,7 @@ function ExportButtons({ onExport }) {
         <button
           key={format}
           onClick={() => onExport(format.toLowerCase())}
-          className="px-2 py-1 rounded-md border border-mud-base/30 bg-mud-light text-[10px] font-semibold text-mud-base hover:bg-mud-light transition-colors"
+          className="px-2 py-1 rounded-md border border-slate-200 bg-slate-50 text-[10px] font-semibold text-teal-600 hover:bg-slate-50 transition-colors"
         >
           {format}
         </button>
@@ -59,10 +59,10 @@ function Panel({ icon: Icon, label, text, loading, loadingLabel, accent, onExpor
   const paragraphs = useMemo(() => normalizeParagraphText(text), [text])
   const normalizedText = useMemo(() => paragraphs.join('\n\n'), [paragraphs])
   const accentClasses = accent
-    ? 'bg-gradient-to-br from-stone-50/60 to-white/80 border-mud-base/30'
-    : 'bg-gradient-to-br from-white/80 to-stone-50/80 border-mud-base/30'
-  const labelColor = accent ? 'text-mud-dark' : 'text-mud-light0'
-  const textColor = accent ? 'text-mud-dark/90' : 'text-mud-dark'
+    ? 'bg-gradient-to-br from-stone-50/60 to-white/80 border-slate-200'
+    : 'bg-gradient-to-br from-white/80 to-stone-50/80 border-slate-200'
+  const labelColor = accent ? 'text-slate-900' : 'text-slate-500'
+  const textColor = accent ? 'text-slate-800' : 'text-slate-900'
 
   useEffect(() => {
     if (!scrollRef.current || !paragraphs.length) return
@@ -91,7 +91,7 @@ function Panel({ icon: Icon, label, text, loading, loadingLabel, accent, onExpor
           <div className="w-2 h-2 rounded-full bg-brand-400 dot-1" />
           <div className="w-2 h-2 rounded-full bg-brand-400 dot-2" />
           <div className="w-2 h-2 rounded-full bg-brand-400 dot-3" />
-          <span className="text-xs font-medium text-mud-base">{loadingLabel}</span>
+          <span className="text-xs font-medium text-teal-600">{loadingLabel}</span>
         </div>
       ) : null}
 
@@ -103,18 +103,18 @@ function Panel({ icon: Icon, label, text, loading, loadingLabel, accent, onExpor
               return (
                 <p
                   key={`${label}-${i}-${paragraph.slice(0, 16)}`}
-                  className={`text-sm leading-6 font-mono whitespace-pre-wrap px-2.5 py-1.5 rounded-lg transition-all duration-300 ${textColor} ${loading && isLast ? 'bg-mud-dark/10/70 border border-mud-base/30' : ''
+                  className={`text-sm leading-6 font-mono whitespace-pre-wrap px-2.5 py-1.5 rounded-lg transition-all duration-300 ${textColor} ${loading && isLast ? 'bg-slate-900/10/70 border border-slate-200' : ''
                     }`}
                 >
                   <span>{paragraph}</span>
-                  {loading && isLast ? <span className="inline-block w-0.5 h-[1em] bg-mud-light0 ml-0.5 align-middle animate-typing" /> : null}
+                  {loading && isLast ? <span className="inline-block w-0.5 h-[1em] bg-slate-500 ml-0.5 align-middle animate-typing" /> : null}
                 </p>
               )
             })}
           </div>
         </div>
       ) : !loading ? (
-        <p className="text-xs text-mud-dark/50 italic">Output will appear here...</p>
+        <p className="text-xs text-slate-900/50 italic">Output will appear here...</p>
       ) : null}
     </section>
   )
@@ -138,18 +138,18 @@ export default function TranscriptPanel({
   return (
     <div className="space-y-3">
       {loading ? (
-        <div className="rounded-2xl border border-mud-base/30 bg-mud-light px-5 py-4 animate-fade-in shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 animate-fade-in shadow-sm">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-5 h-5 rounded-full border-2 border-mud-base/30 border-t-brand-500 animate-spin flex-shrink-0" />
-            <span className="text-sm font-semibold text-mud-dark">{status}</span>
-            <Zap size={14} className="text-mud-dark/80 ml-auto animate-pulse" />
+            <div className="w-5 h-5 rounded-full border-2 border-slate-200 border-t-brand-500 animate-spin flex-shrink-0" />
+            <span className="text-sm font-semibold text-slate-900">{status}</span>
+            <Zap size={14} className="text-slate-900/80 ml-auto animate-pulse" />
           </div>
-          <div className="h-1.5 rounded-full bg-mud-light overflow-hidden">
+          <div className="h-1.5 rounded-full bg-slate-50 overflow-hidden">
             <div
               className="h-full rounded-full bg-gradient-to-r from-stone-800 to-stone-400 relative overflow-hidden"
               style={{ width: translation ? '92%' : original ? '64%' : '32%', transition: 'width 0.6s ease' }}
             >
-              <div className="absolute inset-0 bg-mud-light animate-progress" />
+              <div className="absolute inset-0 bg-slate-50 animate-progress" />
             </div>
           </div>
         </div>
@@ -158,17 +158,17 @@ export default function TranscriptPanel({
       {(duration > 0 || detectedLang || sourceLabel) ? (
         <div className="flex items-center gap-2 px-1 animate-slide-up flex-wrap">
           {sourceLabel ? (
-            <span className="tag bg-neon-cyan/10 text-mud-dark border border-mud-base/30">
+            <span className="tag bg-neon-cyan/10 text-slate-900 border border-slate-200">
               <FileText size={10} /> Source: {sourceLabel}
             </span>
           ) : null}
           {duration > 0 ? (
-            <span className="tag bg-mud-light text-mud-dark border border-mud-base/30">
+            <span className="tag bg-slate-50 text-slate-900 border border-slate-200">
               <Clock size={10} /> {duration}s
             </span>
           ) : null}
           {detectedLang ? (
-            <span className="tag bg-mud-light0/10 text-mud-dark border border-mud-base/30">
+            <span className="tag bg-slate-500/10 text-slate-900 border border-slate-200">
               <Sparkles size={10} /> Detected: {detectedLang}
             </span>
           ) : null}
@@ -197,11 +197,11 @@ export default function TranscriptPanel({
 
       {isEmpty ? (
         <div className="text-center py-16 animate-fade-in">
-          <div className="w-16 h-16 rounded-2xl bg-mud-light border border-mud-base/30 flex items-center justify-center mx-auto mb-4 animate-float">
-            <FileText size={24} className="text-mud-dark/80" />
+          <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mx-auto mb-4 animate-float">
+            <FileText size={24} className="text-slate-900/80" />
           </div>
-          <p className="text-sm font-medium text-mud-light0">Upload audio or paste a source URL to begin</p>
-          <p className="text-xs text-mud-dark/50 mt-1">Transcript and translation will stream here in readable paragraph form</p>
+          <p className="text-sm font-medium text-slate-500">Upload audio or paste a source URL to begin</p>
+          <p className="text-xs text-slate-900/50 mt-1">Transcript and translation will stream here in readable paragraph form</p>
         </div>
       ) : null}
     </div>
