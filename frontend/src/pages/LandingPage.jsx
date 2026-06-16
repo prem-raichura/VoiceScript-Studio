@@ -163,7 +163,7 @@ function FeatureCard({ f, index }) {
         transition: `opacity 0.7s ease ${f.delay}ms, transform 0.7s cubic-bezier(0.16,1,0.3,1) ${f.delay}ms`,
       }}
     >
-      <div className={`w-12 h-12 rounded-xl border ${f.color} ${f.border} flex items-center justify-center mb-6`}>
+      <div className={`w-12 h-12 rounded-xl border ${f.color} ${f.border} flex items-center justify-center mb-6 transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-6`}>
         <f.icon size={20} />
       </div>
       <h3 className="font-semibold text-slate-900 text-lg mb-3 tracking-tight">{f.title}</h3>
@@ -183,9 +183,9 @@ export default function LandingPage({ onStart }) {
       
       {/* ── Background Globs ── */}
       <div className="absolute top-0 left-0 w-full h-[800px] overflow-hidden -z-10 pointer-events-none">
-        <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[60%] rounded-full bg-teal-400/20 blur-[120px]" />
-        <div className="absolute top-[20%] -right-[10%] w-[40%] h-[50%] rounded-full bg-cyan-400/20 blur-[120px]" />
-        <div className="absolute -bottom-[10%] left-[20%] w-[60%] h-[50%] rounded-full bg-cyan-400/20 blur-[120px]" />
+        <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[60%] rounded-full bg-teal-400/20 blur-[120px] animate-blob" />
+        <div className="absolute top-[20%] -right-[10%] w-[40%] h-[50%] rounded-full bg-cyan-400/20 blur-[120px] animate-blob" style={{animationDelay: '2s'}} />
+        <div className="absolute -bottom-[10%] left-[20%] w-[60%] h-[50%] rounded-full bg-emerald-400/20 blur-[120px] animate-blob" style={{animationDelay: '4s'}} />
       </div>
 
       {/* ── Nav ── */}
@@ -207,14 +207,14 @@ export default function LandingPage({ onStart }) {
       <section className="relative px-8 pt-40 pb-24 max-w-7xl mx-auto flex flex-col lg:flex-row items-center gap-16 lg:gap-24">
         
         <div className="flex-1 text-left">
-          <div className="animate-fade-up inline-flex items-center gap-2 px-3 py-1 mb-8 rounded bg-teal-50 border border-slate-200 text-teal-600 text-xs font-semibold tracking-wide">
-            <Sparkles size={12} className="text-teal-600" />
+          <div className="animate-fade-up inline-flex items-center gap-2 px-3 py-1 mb-8 rounded bg-teal-50 border border-teal-200 text-teal-600 text-xs font-semibold tracking-wide">
+            <Sparkles size={12} className="text-teal-600 animate-pulse" />
             Audio Intelligence
           </div>
 
           <h1 className="animate-fade-up-delay max-w-2xl text-6xl sm:text-7xl lg:text-8xl font-light tracking-tighter leading-[1.05] text-slate-900 mb-8">
             Audio to text, <br/>
-            <span className="font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-500 via-cyan-500 to-emerald-500">instantly.</span>
+            <span className="font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-500 via-cyan-500 to-emerald-500 animate-text-shimmer inline-block">instantly.</span>
           </h1>
 
           <p className="animate-fade-up-delay2 max-w-xl text-lg sm:text-xl text-slate-500 leading-relaxed mb-12">
@@ -248,7 +248,7 @@ export default function LandingPage({ onStart }) {
         </div>
 
         <div className="flex-1 w-full max-w-lg lg:max-w-none relative animate-fade-in" style={{animationDelay: '0.4s'}}>
-          <div className="relative bg-white rounded-3xl p-2 border border-slate-200 shadow-2xl shadow-slate-900/5">
+          <div className="relative bg-white rounded-3xl p-2 border border-slate-200 shadow-2xl shadow-slate-900/5 animate-float">
             <div className="bg-slate-50 rounded-[1.25rem] border border-slate-200 overflow-hidden h-[500px] flex flex-col">
               <div className="h-14 border-b border-slate-200 bg-white flex items-center px-6 gap-4">
                 <div className="flex gap-1.5">
@@ -260,8 +260,8 @@ export default function LandingPage({ onStart }) {
               <div className="flex-1 p-8 flex flex-col gap-6">
                 <div className="w-full bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
                   <div className="flex items-center gap-4 mb-4">
-                    <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center">
-                      <Mic size={18} className="text-slate-900" />
+                    <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center group-hover:animate-bounce">
+                      <Mic size={18} className="text-teal-600" />
                     </div>
                     <div className="flex-1">
                       <div className="h-2.5 w-32 bg-slate-50 rounded-full mb-2" />
@@ -292,10 +292,10 @@ export default function LandingPage({ onStart }) {
 
       {/* ── Features ── */}
       <section className="px-8 py-32 max-w-7xl mx-auto">
-        <div className="mb-16 animate-fade-up">
+        <div className="mb-16">
           <h2 className="text-4xl sm:text-5xl font-light text-slate-900 tracking-tighter mb-6">
             Everything you need. <br/>
-            <span className="font-bold">Nothing you don't.</span>
+            <span className="font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-500 to-cyan-500 animate-text-shimmer inline-block">Nothing you don't.</span>
           </h2>
           <p className="text-slate-500 text-lg max-w-xl">
             A complete audio intelligence pipeline — from upload to export — wrapped in a minimalist, distraction-free interface.
@@ -311,7 +311,7 @@ export default function LandingPage({ onStart }) {
         <div className="max-w-7xl mx-auto">
           <div className="mb-20 text-center">
             <h2 className="text-4xl sm:text-5xl font-light text-slate-900 tracking-tighter">
-              Simple <span className="font-bold text-teal-600">Process</span>
+              Simple <span className="font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-500 to-cyan-500 animate-text-shimmer inline-block">Process</span>
             </h2>
           </div>
 
@@ -319,7 +319,7 @@ export default function LandingPage({ onStart }) {
             {STEPS.map((step, i) => (
               <div 
                 key={step.num} 
-                className="flex flex-col items-center sm:items-start text-center sm:text-left transition-all duration-700"
+                className="group flex flex-col items-center sm:items-start text-center sm:text-left transition-all duration-700 hover:-translate-y-2 cursor-default"
                 style={{
                   opacity: stepsVisible ? 1 : 0,
                   transform: stepsVisible ? 'translateY(0)' : 'translateY(24px)',
@@ -327,7 +327,7 @@ export default function LandingPage({ onStart }) {
                 }}
               >
                 <div className="text-sm font-bold text-slate-900/50 mb-6 tracking-widest">{step.num}</div>
-                <div className={`w-16 h-16 rounded-2xl ${step.color} flex items-center justify-center mb-8`}>
+                <div className={`w-16 h-16 rounded-2xl ${step.color} flex items-center justify-center mb-8 transition-transform duration-500 group-hover:scale-110 group-hover:rotate-12`}>
                   <step.icon size={24} />
                 </div>
                 <h3 className="font-semibold text-slate-900 text-xl mb-4 tracking-tight">{step.title}</h3>
@@ -342,7 +342,7 @@ export default function LandingPage({ onStart }) {
       <section className="px-8 py-32 bg-gradient-to-br from-teal-900 via-cyan-900 to-slate-900 text-white text-center flex flex-col items-center">
         <div className="max-w-2xl">
           <h2 className="text-5xl sm:text-6xl font-light tracking-tighter mb-8">
-            Ready to <span className="font-bold text-cyan-300">transcribe?</span>
+            Ready to <span className="font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-300 to-cyan-200 animate-text-shimmer inline-block">transcribe?</span>
           </h2>
           <p className="text-white/60 text-lg mb-12">
             No account needed. Just upload your audio and let the AI do the work.
