@@ -652,7 +652,7 @@ export default function App() {
     let finalTranslation = ''
 
     try {
-      const res = await fetch(`${API_BASE}/api/translate-text`, {
+      const res = await fetch(`${API_BASE}/api/transtone-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText, target_lang: targetLang }),
@@ -1037,7 +1037,7 @@ export default function App() {
   }, [exportBundle, history, original, sourceLabel, translation])
 
   return (
-    <div className="min-h-screen lg:h-screen w-full bg-transparent relative overflow-hidden text-slate-800 flex flex-col lg:flex-row">
+    <div className="min-h-screen lg:h-screen w-full bg-mud-light relative overflow-hidden text-mud-dark flex flex-col lg:flex-row">
       <Toaster
         position="top-right"
         toastOptions={{
@@ -1071,25 +1071,20 @@ export default function App() {
           },
         }}
       />
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-24 -left-24 w-80 h-80 rounded-full bg-indigo-500/10 blur-[120px] animate-pulse-ring" />
-        <div className="absolute top-1/3 -right-16 w-72 h-72 rounded-full bg-violet-500/10 blur-[100px] animate-float" />
-        <div className="absolute -bottom-16 left-1/3 w-72 h-72 rounded-full bg-sky-500/10 blur-[120px] animate-pulse-ring" />
-      </div>
 
       {/* Sidebar Navigation */}
-      <aside className="relative z-20 w-full lg:w-80 border-r border-white/60 backdrop-blur-xl bg-white/60 shadow-glass flex flex-col lg:h-full flex-shrink-0">
-        <div className="p-5 border-b border-white/60 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-white border border-white/80 flex items-center justify-center shadow-sm">
-            <Mic size={17} className="text-slate-900" />
+      <aside className="relative z-20 w-full lg:w-80 border-r border-mud-base/30 bg-mud-light shadow-sm flex flex-col lg:h-full flex-shrink-0">
+        <div className="p-6 border-b border-mud-base/30 flex items-center gap-4">
+          <div className="w-10 h-10 rounded-2xl bg-mud-light border border-mud-base/30 flex items-center justify-center shadow-sm">
+            <Mic size={17} className="text-mud-dark" />
           </div>
           <div>
-            <p className="font-extrabold tracking-tight text-slate-900">VoiceScript Studio</p>
-            <p className="text-[11px] text-slate-500">Smart audio dashboard</p>
+            <p className="font-extrabold tracking-tight text-mud-dark">VoiceScript Studio</p>
+            <p className="text-[11px] text-mud-light0">Smart audio dashboard</p>
           </div>
         </div>
 
-        <div className="p-5 border-b border-white/60">
+        <div className="p-6 border-b border-mud-base/30">
           <LanguageSelector
             sourceLang={sourceLang}
             targetLang={targetLang}
@@ -1099,7 +1094,7 @@ export default function App() {
           />
         </div>
 
-        <div className="flex-1 p-5 overflow-y-auto scrollbar-thin">
+        <div className="flex-1 p-6 overflow-y-auto scrollbar-thin">
           <History
             items={history}
             onSelect={(item) => {
@@ -1116,9 +1111,9 @@ export default function App() {
 
       {/* Main Content Dashboard */}
       <main className="relative z-10 flex-1 h-full overflow-y-auto scrollbar-thin flex flex-col">
-        <header className="h-16 border-b border-white/60 backdrop-blur-md bg-white/40 flex items-center justify-between px-6 flex-shrink-0 hidden lg:flex">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <Sparkles size={12} className="text-indigo-600" />
+        <header className="h-16 border-b border-mud-base/30 bg-mud-light flex items-center justify-between px-6 flex-shrink-0 hidden lg:flex">
+          <div className="flex items-center gap-2 text-xs text-mud-light0">
+            <Sparkles size={12} className="text-mud-dark" />
             Source detection, extraction, transcription, translation
           </div>
           <div className="flex items-center gap-2">
@@ -1134,7 +1129,7 @@ export default function App() {
         </header>
 
         {/* Dashboard Grid Container */}
-        <div className="p-4 lg:p-6 grid grid-cols-1 xl:grid-cols-12 gap-6 w-full max-w-7xl mx-auto">
+        <div className="p-6 lg:p-10 grid grid-cols-1 xl:grid-cols-12 gap-8 w-full max-w-7xl mx-auto">
 
           {/* Top Control Panel: Input Pipeline (Full Width) */}
           <section className="glass-panel xl:col-span-12">
@@ -1144,16 +1139,16 @@ export default function App() {
               <div className="w-full md:w-[50%] md:flex-none p-5 flex flex-col gap-4">
                 {/* Heading */}
                 <div>
-                  <h1 className="text-base font-black tracking-tight text-slate-900">Input Pipeline</h1>
-                  <p className="text-xs text-slate-500 mt-0.5">Paste a link or upload an audio file to begin.</p>
+                  <h1 className="text-base font-black tracking-tight text-mud-dark">Input Pipeline</h1>
+                  <p className="text-xs text-mud-light0 mt-0.5">Paste a link or upload an audio file to begin.</p>
                 </div>
 
                 {/* URL row */}
                 <div className="space-y-1.5">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Source URL</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mud-dark/50">Source URL</p>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 relative">
-                      <Link2 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      <Link2 size={15} className="absolute left-3.5 top-1/2 -transtone-y-1/2 text-mud-dark/50 pointer-events-none" />
                       <input
                         type="url"
                         value={sourceUrl}
@@ -1166,7 +1161,7 @@ export default function App() {
                       {sourceUrl && !sourceDetecting && !sourceExtracting && (
                         <button
                           onClick={() => { setSourceUrl(''); setSourceStatusMessage(''); setSourceInfo(null) }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
+                          className="absolute right-3 top-1/2 -transtone-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-mud-dark/50 hover:text-mud-dark/80 hover:bg-mud-light transition-all"
                         >
                           <X size={12} />
                         </button>
@@ -1176,7 +1171,7 @@ export default function App() {
                       onClick={() => handleDetectAndExtract(sourceUrl)}
                       disabled={busy || sourceDetecting || sourceExtracting || !sourceUrl.trim()}
                       className={`inline-flex items-center gap-2 py-2 px-4 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0 transition-all duration-200 ${sourceDetecting || sourceExtracting
-                        ? 'bg-violet-500 text-white shadow-lg shadow-violet-500/25'
+                        ? 'bg-mud-base text-white shadow-lg shadow-mud-dark/20/25'
                         : 'btn-brand'
                         }`}
                     >
@@ -1190,8 +1185,8 @@ export default function App() {
 
                   {/* Status line */}
                   {sourceStatusMessage && (
-                    <p className="text-xs text-slate-500 pl-1 animate-fade-in flex items-center gap-1.5">
-                      {sourceExtracting && <Loader2 size={11} className="animate-spin text-violet-500" />}
+                    <p className="text-xs text-mud-light0 pl-1 animate-fade-in flex items-center gap-1.5">
+                      {sourceExtracting && <Loader2 size={11} className="animate-spin text-mud-dark/50" />}
                       {lastBlob && sourceInfo && !sourceExtracting && <CheckCircle2 size={11} className="text-emerald-500" />}
                       {sourceStatusMessage}
                     </p>
@@ -1220,15 +1215,15 @@ export default function App() {
               </div>
 
               {sourceInfo ? (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 mt-2">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Detected Source</p>
-                  <p className="text-sm font-semibold text-indigo-600 mt-0.5">{sourceInfo.label || 'Unknown'}</p>
+                <div className="rounded-xl border border-mud-base/30 bg-mud-light px-3 py-2 mt-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-mud-dark">Detected Source</p>
+                  <p className="text-sm font-semibold text-mud-dark mt-0.5">{sourceInfo.label || 'Unknown'}</p>
                 </div>
               ) : null}
             </div>
 
             <div className="glass-panel p-5 space-y-2.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">Pipeline Status</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mud-dark/50 mb-3">Pipeline Status</p>
               {PIPELINE_STEPS.map((step, index) => {
                 const stepNum = index + 1
                 const rank = STEP_RANK[pipelineStep] || 0
@@ -1238,22 +1233,22 @@ export default function App() {
                   <div key={step.id} className="flex items-center gap-2.5">
                     {/* Icon */}
                     {done ? (
-                      <span className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
+                      <span className="w-5 h-5 rounded-full bg-mud-moss/200 flex items-center justify-center flex-shrink-0">
                         <CheckCircle2 size={13} className="text-white" strokeWidth={2.5} />
                       </span>
                     ) : isCurrent ? (
-                      <span className="w-5 h-5 rounded-full border-2 border-indigo-500 flex items-center justify-center flex-shrink-0">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                      <span className="w-5 h-5 rounded-full border-2 border-stone-800 flex items-center justify-center flex-shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-mud-dark" />
                       </span>
                     ) : (
-                      <span className="w-5 h-5 rounded-full border-2 border-slate-300 flex-shrink-0" />
+                      <span className="w-5 h-5 rounded-full border-2 border-mud-base/50 flex-shrink-0" />
                     )}
                     {/* Label */}
                     <span className={`text-[13px] leading-tight ${done
                       ? 'text-emerald-600 font-medium'
                       : isCurrent
-                        ? 'text-slate-800 font-bold'
-                        : 'text-slate-400 font-normal'
+                        ? 'text-mud-dark font-bold'
+                        : 'text-mud-dark/50 font-normal'
                       }`}>
                       {step.label}
                     </span>
@@ -1267,7 +1262,7 @@ export default function App() {
           <section className="xl:col-span-8 flex flex-col gap-4">
             {(hasOutput || hasExportableData) && !busy ? (
               <div className="flex items-center justify-between glass-panel px-5 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Export Results</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-mud-light0">Export Results</p>
                 <div className="flex gap-2">
                   <button onClick={() => exportData('txt', 'both')} className="btn-ghost py-1 px-2.5 text-xs"><Download size={12} /> TXT</button>
                   <button onClick={() => exportData('doc', 'both')} className="btn-ghost py-1 px-2.5 text-xs"><Download size={12} /> DOC</button>
@@ -1277,14 +1272,14 @@ export default function App() {
             ) : null}
 
             {error ? (
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-5 shadow-sm animate-scale-in">
+              <div className="rounded-2xl border border-red-200 bg-mud-clay/20 p-5 shadow-sm animate-scale-in">
                 <div className="flex items-start gap-3">
                   <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
-                    <AlertCircle size={18} className="text-red-400" />
+                    <AlertCircle size={18} className="text-mud-clay" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-sm text-red-400">Processing error</p>
-                    <p className="text-sm text-red-400 mt-1 leading-relaxed">{error}</p>
+                    <p className="font-bold text-sm text-mud-clay">Processing error</p>
+                    <p className="text-sm text-mud-clay mt-1 leading-relaxed">{error}</p>
                   </div>
                 </div>
               </div>
