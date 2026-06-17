@@ -142,24 +142,24 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
           flex flex-col items-center justify-center gap-3 flex-1 px-6 text-center select-none
           ${disabled || uploading ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}
           ${dragging
-            ? 'border-brand-400 bg-slate-50 scale-[1.02]'
+            ? 'border-teal-200 bg-slate-50 scale-[1.02]'
             : file && !uploading
               ? 'border-green-500/30 bg-gradient-to-br from-green-50 to-emerald-50'
               : uploading
-                ? 'border-indigo-400/40 bg-gradient-to-br from-indigo-50 to-violet-50'
-                : 'border-brand-500/30 bg-gradient-to-br from-white to-brand-50/40 hover:border-brand-400 hover:from-brand-50 hover:to-indigo-50 hover:scale-[1.01]'}`}
+                ? 'border-teal-200/40 bg-gradient-to-br from-stone-50 to-stone-400'
+                : 'border-slate-200 bg-gradient-to-br from-white to-brand-50/40 hover:border-teal-200 hover:from-brand-50 hover:to-stone-50 hover:scale-[1.01]'}`}
       >
         {/* ── Uploading state ── */}
         {uploading ? (
           <>
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
-              <Server size={20} className="text-indigo-500 animate-pulse" />
+            <div className="w-10 h-10 rounded-xl bg-slate-900/10 flex items-center justify-center">
+              <Server size={20} className="text-slate-900 animate-pulse" />
             </div>
             <div className="animate-fade-in space-y-2 w-full max-w-[220px]">
-              <p className="font-semibold text-sm text-slate-800">{uploadStatus}</p>
-              <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+              <p className="font-semibold text-sm text-slate-900">{uploadStatus}</p>
+              <div className="w-full bg-slate-50 rounded-full h-1.5 overflow-hidden">
                 <div
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                  className="h-full bg-slate-900 rounded-full transition-all duration-300"
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
@@ -171,18 +171,18 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
         ) : file ? (
           <>
             <div className="relative">
-              <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center animate-scale-in">
-                <CheckCircle2 size={22} className="text-green-500" />
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center animate-scale-in">
+                <CheckCircle2 size={22} className="text-emerald-700" />
               </div>
             </div>
             <div className="animate-fade-in space-y-1">
-              <p className="font-semibold text-sm text-slate-800 truncate max-w-[200px]">{file.name}</p>
+              <p className="font-semibold text-sm text-slate-900 truncate max-w-[200px]">{file.name}</p>
               <p className="text-xs text-slate-500">{formatSize(file.size)} · Ready to process</p>
             </div>
             <button
               onClick={clear}
               className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center
-                         text-slate-700 hover:text-slate-700 hover:bg-white/80 transition-all duration-150"
+                         text-slate-800 hover:text-slate-800 hover:bg-slate-50 transition-all duration-150"
             >
               <X size={14} />
             </button>
@@ -191,22 +191,22 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
           <>
             <div className={`w-9 h-9 flex items-center justify-center transition-all duration-300
               ${dragging
-                ? 'text-indigo-700 scale-110'
-                : 'text-indigo-500'}`}>
+                ? 'text-slate-800 scale-110'
+                : 'text-slate-900'}`}>
               <Upload size={22} strokeWidth={1.75} className={dragging ? 'animate-bounce' : ''} />
             </div>
             <div className="space-y-1">
-              <p className="font-semibold text-[13px] text-slate-800 leading-snug">
+              <p className="font-semibold text-[13px] text-slate-900 leading-snug">
                 {dragging ? 'Drop your audio file here' : 'Drag & drop or click to upload'}
               </p>
-              <p className="text-[11px] text-slate-400 leading-snug">MP3, WAV, M4A, OGG, WebM · up to 1.2 GB</p>
+              <p className="text-[11px] text-slate-900/50 leading-snug">MP3, WAV, M4A, OGG, WebM · up to 1.2 GB</p>
             </div>
           </>
         )}
       </div>
 
       {error && (
-        <p className="text-xs text-red-500 px-2 py-1.5 rounded-lg bg-red-50 border border-red-500/20 animate-fade-in flex items-center gap-1.5">
+        <p className="text-xs text-rose-600 px-2 py-1.5 rounded-lg bg-rose-50 border border-rose-200/20 animate-fade-in flex items-center gap-1.5">
           <AlertCircle size={12} /> {error}
         </p>
       )}

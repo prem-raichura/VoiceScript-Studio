@@ -473,10 +473,12 @@ exports.transcribeSession = async (req, res) => {
     sessionDir = assembled.dir;
     ext = assembled.ext;
   } catch (err) {
+    uploadController.cleanupSession(session_id);
     return res.status(404).json({ error: `Assembly failed: ${err.message}` });
   }
 
   const cleanup = () => uploadController.cleanupSession(session_id);
+  req.on("close", cleanup);
 
   try {
     const fileSize = fs.statSync(outputPath).size;
