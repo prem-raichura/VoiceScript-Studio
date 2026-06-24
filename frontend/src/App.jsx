@@ -26,7 +26,7 @@ import { segmentAudio } from './utils/clientChunker'
 // Whisper hard limit. <=25 MB → backend transcribes the blob directly.
 // >25 MB → client-side ffmpeg.wasm segmentation + per-chunk transcription.
 const LARGE_FILE_THRESHOLD_BYTES = 25 * 1024 * 1024
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 
 // Fire-and-forget removal of a stored blob once we no longer need it.
 function deleteBlob(blobUrl) {

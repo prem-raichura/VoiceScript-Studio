@@ -4,7 +4,7 @@ import { toast } from 'react-hot-toast'
 import { upload } from '@vercel/blob/client'
 
 const MAX_MB = 1024
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 
 /**
  * Uploads a file straight to Vercel Blob via a client-upload token.
