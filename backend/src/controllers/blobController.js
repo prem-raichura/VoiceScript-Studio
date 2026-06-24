@@ -14,8 +14,13 @@ const { del } = require("@vercel/blob");
 const ONE_GB = 1024 * 1024 * 1024;
 
 exports.handleBlobUpload = async (req, res) => {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    console.error("[blob] BLOB_READ_WRITE_TOKEN is not set in this environment");
+    return res.status(500).json({ error: "BLOB_READ_WRITE_TOKEN missing on server" });
+  }
   try {
     const jsonResponse = await handleUpload({
+      token: process.env.BLOB_READ_WRITE_TOKEN,
       body: req.body,
       request: req,
       onBeforeGenerateToken: async (/* pathname */) => ({
@@ -33,8 +38,8 @@ exports.handleBlobUpload = async (req, res) => {
     });
     return res.json(jsonResponse);
   } catch (err) {
-    console.error("[blob] upload token error:", err);
-    return res.status(400).json({ error: err.message });
+    console.error("[blob] upload token error:", err?.message, err);
+    return res.status(400).json({ error: err?.message || "blob upload failed" });
   }
 };
 
