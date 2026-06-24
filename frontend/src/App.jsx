@@ -571,8 +571,10 @@ export default function App() {
       deleteBlob(blobUrl)
       setLastBlobUrl(null)
       if (err.name !== 'AbortError') {
-        toast.error(err.message?.slice(0, 80) || 'Large-file transcription failed.')
-        setError(err.message || 'Large-file transcription failed.')
+        const msg = err?.message || String(err) || 'Large-file transcription failed.'
+        console.error('[large-file] failed:', err)
+        toast.error(msg.slice(0, 100))
+        setError(msg)
         setLoading(false)
         setPipelineStep('error')
       }

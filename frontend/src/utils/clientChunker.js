@@ -20,13 +20,19 @@ let _ffmpeg = null
 async function getFFmpeg(onProgress) {
   if (_ffmpeg) return _ffmpeg
   const ffmpeg = new FFmpeg()
+  ffmpeg.on('log', ({ message }) => console.log('[ffmpeg]', message))
   if (onProgress) {
     ffmpeg.on('progress', ({ progress }) => onProgress(Math.min(100, Math.round(progress * 100))))
   }
-  await ffmpeg.load({
-    coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm'),
-  })
+  try {
+    const [coreURL, wasmURL] = await Promise.all([
+      toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript'),
+      toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm'),
+    ])
+    await ffmpeg.load({ coreURL, wasmURL })
+  } catch (e) {
+    throw new Error(`Failed to load audio engine (ffmpeg.wasm): ${e?.message || e}`)
+  }
   _ffmpeg = ffmpeg
   return ffmpeg
 }
@@ -45,7 +51,7 @@ export async function segmentAudio(file, onStatus = () => {}) {
   await ffmpeg.writeFile(inputName, await fetchFile(file))
 
   onStatus('Segmenting audio…', 0)
-  await ffmpeg.exec([
+  const code = await ffmpeg.exec([
     '-i', inputName,
     '-vn',
     '-ac', '1',
@@ -56,6 +62,7 @@ export async function segmentAudio(file, onStatus = () => {}) {
     '-reset_timestamps', '1',
     'chunk_%03d.mp3',
   ])
+  if (code !== 0) throw new Error(`ffmpeg segmentation failed (exit ${code}). Unsupported or corrupt audio?`)
 
   const entries = await ffmpeg.listDir('/')
   const chunkNames = entries
