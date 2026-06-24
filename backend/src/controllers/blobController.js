@@ -18,10 +18,21 @@ exports.handleBlobUpload = async (req, res) => {
     console.error("[blob] BLOB_READ_WRITE_TOKEN is not set in this environment");
     return res.status(500).json({ error: "BLOB_READ_WRITE_TOKEN missing on server" });
   }
+  // Normalize body — depending on runtime/proxy, req.body may arrive as an
+  // object, a JSON string, or a Buffer. handleUpload needs the parsed object.
+  let body = req.body;
+  try {
+    if (Buffer.isBuffer(body)) body = JSON.parse(body.toString("utf8"));
+    else if (typeof body === "string") body = JSON.parse(body || "{}");
+  } catch (e) {
+    console.error("[blob] failed to parse upload body:", e?.message);
+    return res.status(400).json({ error: "Invalid request body" });
+  }
+
   try {
     const jsonResponse = await handleUpload({
       token: process.env.BLOB_READ_WRITE_TOKEN,
-      body: req.body,
+      body,
       request: req,
       onBeforeGenerateToken: async (/* pathname */) => ({
         allowedContentTypes: [
