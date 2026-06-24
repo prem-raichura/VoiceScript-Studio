@@ -1,12 +1,15 @@
 # =============================================================
 #  VoiceScript Studio — Backend .gitignore
-#  Stack: Node.js · Express · Groq · yt-dlp · ffmpeg
+#  Stack: Node.js · Express · Groq · Vercel Blob
 # =============================================================
 
 # ── Dependencies ──────────────────────────────────────────────
 node_modules/
 .pnp
 .pnp.js
+
+# ── Vercel ────────────────────────────────────────────────────
+.vercel
 
 cookies.txt
 

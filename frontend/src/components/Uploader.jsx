@@ -1,66 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, X, CheckCircle2, AlertCircle, Server, Loader2 } from 'lucide-react'
+import { Upload, X, CheckCircle2, AlertCircle, Server } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { upload } from '@vercel/blob/client'
 
-const MAX_MB = 1228
-const CHUNK_SIZE = 4 * 1024 * 1024 // 4 MB per chunk
-const UPLOAD_CONCURRENCY = 4 // parallel chunk uploads — much faster than sequential
+const MAX_MB = 1024
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
-async function uploadOneChunk(sessionId, file, totalChunks, index) {
-  const start = index * CHUNK_SIZE
-  const end = Math.min(start + CHUNK_SIZE, file.size)
-  const chunk = file.slice(start, end)
-
-  const fd = new FormData()
-  fd.append('session_id', sessionId)
-  fd.append('chunk_index', String(index))
-  fd.append('total_chunks', String(totalChunks))
-  fd.append('chunk', chunk, file.name)
-
-  const res = await fetch(`${API_BASE}/api/upload-chunk`, { method: 'POST', body: fd })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || `Chunk ${index + 1} upload failed (${res.status})`)
-  }
-}
-
 /**
- * Uploads a file to the Render backend in 4 MB chunks.
- * 1. POST /api/upload-init   → gets session_id (also wakes Render)
- * 2. POST /api/upload-chunk  × N  → sends slices with limited concurrency
- * Chunks carry their own index, so order of arrival does not matter.
- * Returns session_id on success.
+ * Uploads a file straight to Vercel Blob via a client-upload token.
+ * Bypasses Vercel's 4.5 MB request body cap and supports multipart up to ~1 GB.
+ * Returns the public blob URL.
  */
-async function uploadToServer(file, onProgress) {
-  // Step 1 — init session (wakes Render if sleeping)
-  const initRes = await fetch(`${API_BASE}/api/upload-init`, { method: 'POST' })
-  if (!initRes.ok) throw new Error(`Server init failed (${initRes.status})`)
-  const { session_id } = await initRes.json()
-
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
-  console.log(`[upload] session=${session_id} chunks=${totalChunks} file=${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`)
-
-  // Step 2 — upload chunks with a bounded concurrency pool
-  let nextIndex = 0
-  let completed = 0
-
-  const worker = async () => {
-    while (nextIndex < totalChunks) {
-      const index = nextIndex++
-      await uploadOneChunk(session_id, file, totalChunks, index)
-      completed++
-      onProgress(Math.round((completed / totalChunks) * 100))
-    }
-  }
-
-  const workers = Array.from(
-    { length: Math.min(UPLOAD_CONCURRENCY, totalChunks) },
-    () => worker(),
-  )
-  await Promise.all(workers)
-
-  return session_id
+async function uploadToBlob(file, onProgress) {
+  const result = await upload(file.name, file, {
+    access: 'public',
+    handleUploadUrl: `${API_BASE}/api/blob/upload`,
+    multipart: true,
+    onUploadProgress: (e) => onProgress(Math.round(e.percentage)),
+  })
+  return result.url
 }
 
 export default function Uploader({ onAudioReady, disabled, selectedFile, onClearSelected }) {
@@ -78,7 +36,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
 
   function validate(f) {
     if (!f) return 'No file selected.'
-    if (f.size > MAX_MB * 1024 * 1024) return `File too large. Max 1.2 GB.`
+    if (f.size > MAX_MB * 1024 * 1024) return `File too large. Max 1 GB.`
     return null
   }
 
@@ -89,18 +47,18 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
     setFile(f)
     setUploading(true)
     setUploadProgress(0)
-    setUploadStatus('Connecting to server…')
+    setUploadStatus('Uploading to storage…')
 
     try {
-      const sessionId = await uploadToServer(f, (pct) => {
+      const blobUrl = await uploadToBlob(f, (pct) => {
         setUploadProgress(pct)
         setUploadStatus(`Uploading… ${pct}%`)
       })
       setUploading(false)
       setUploadStatus('')
       toast.success(`File uploaded — ready to process!`)
-      // Pass session:// ref as the cloudinary URL slot — App.jsx routes accordingly
-      onAudioReady(f, f.name, `session://${sessionId}`)
+      // Pass the Blob URL in the third slot — App.jsx routes on the blob:// scheme
+      onAudioReady(f, f.name, blobUrl)
     } catch (e) {
       setUploading(false)
       setUploadStatus('')
@@ -199,7 +157,7 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
               <p className="font-semibold text-[13px] text-slate-900 leading-snug">
                 {dragging ? 'Drop your audio file here' : 'Drag & drop or click to upload'}
               </p>
-              <p className="text-[11px] text-slate-900/50 leading-snug">MP3, WAV, M4A, OGG, WebM · up to 1.2 GB</p>
+              <p className="text-[11px] text-slate-900/50 leading-snug">MP3, WAV, M4A, OGG, WebM · up to 1 GB</p>
             </div>
           </>
         )}
