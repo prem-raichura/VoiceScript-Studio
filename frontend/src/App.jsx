@@ -1037,7 +1037,7 @@ export default function App() {
   }, [exportBundle, history, original, sourceLabel, translation])
 
   return (
-    <div className="min-h-screen lg:h-screen w-full bg-slate-50 relative overflow-hidden text-slate-900 flex flex-col lg:flex-row">
+    <div className="min-h-screen lg:h-screen w-full bg-brand-50 relative overflow-hidden text-brand-900 flex flex-col lg:flex-row">
       <Toaster
         position="top-right"
         toastOptions={{
