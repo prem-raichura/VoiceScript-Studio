@@ -10,7 +10,11 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
 
-const CORE_BASE = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd'
+// Single-thread core served same-origin from /public/ffmpeg (copied from
+// @ffmpeg/core's dist/umd). The old unpkg CDN fetch was flaky and failed with
+// "failed to import ffmpeg-core.js". The worker needs the UMD (classic) build
+// for importScripts; ST core needs no cross-origin isolation headers.
+const CORE_BASE = `${import.meta.env.BASE_URL || '/'}ffmpeg`.replace(/\/{2,}/g, '/')
 
 // 5-minute mono 16 kHz @ 64 kbps ≈ 2.4 MB per segment — safely under 4.5 MB.
 const SEGMENT_SECONDS = 300
