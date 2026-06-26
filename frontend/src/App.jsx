@@ -81,6 +81,19 @@ function normalizeParagraphText(value = '') {
     .join('\n\n')
 }
 
+// Split a long transcript into word-bounded batches so each translate call
+// stays well under the model's output-token limit. A 90-minute transcript can
+// be ~10k+ words; one call would truncate. ~1200 words ≈ safe per request.
+function splitTextIntoBatches(text, maxWords = 1200) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean)
+  if (words.length <= maxWords) return words.length ? [words.join(' ')] : []
+  const batches = []
+  for (let i = 0; i < words.length; i += maxWords) {
+    batches.push(words.slice(i, i + maxWords).join(' '))
+  }
+  return batches
+}
+
 function escapeHtml(value = '') {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -524,35 +537,45 @@ export default function App() {
 
       // 3. Optional translation of the assembled transcript.
       if (action === 'translate' && finalOriginalText.trim() && !controller.signal.aborted) {
-        setPipeline('translate', 'Translating...')
-        const tRes = await fetch(`${API_BASE}/api/translate-text`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: finalOriginalText, target_lang: targetLang }),
-          signal: controller.signal,
-        })
-        if (!tRes.ok) {
-          const payload = await tRes.json().catch(() => ({}))
-          throw new Error(payload.error || `Translation failed (${tRes.status})`)
-        }
-        const reader = tRes.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            let data = null
-            try { data = JSON.parse(line.slice(6)) } catch { continue }
-            if (data.type === 'translation_chunk') {
-              finalTranslation += data.text || ''
-              setTranslation((prev) => prev + (data.text || ''))
-            } else if (data.type === 'error') {
-              throw new Error(data.message || 'Translation failed.')
+        // Translate in word-bounded batches so a long transcript isn't truncated
+        // by the model's per-call output limit.
+        const batches = splitTextIntoBatches(finalOriginalText)
+        for (let b = 0; b < batches.length; b++) {
+          if (controller.signal.aborted) return
+          setPipeline('translate', batches.length > 1 ? `Translating ${b + 1}/${batches.length}…` : 'Translating...')
+
+          const tRes = await fetch(`${API_BASE}/api/translate-text`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: batches[b], target_lang: targetLang }),
+            signal: controller.signal,
+          })
+          if (!tRes.ok) {
+            const payload = await tRes.json().catch(() => ({}))
+            throw new Error(payload.error || `Translation failed (${tRes.status})`)
+          }
+
+          if (b > 0) { finalTranslation += ' '; setTranslation((prev) => prev + ' ') }
+
+          const reader = tRes.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              let data = null
+              try { data = JSON.parse(line.slice(6)) } catch { continue }
+              if (data.type === 'translation_chunk') {
+                finalTranslation += data.text || ''
+                setTranslation((prev) => prev + (data.text || ''))
+              } else if (data.type === 'error') {
+                throw new Error(data.message || 'Translation failed.')
+              }
             }
           }
         }

@@ -21,7 +21,7 @@ async function translateStream(res, originalText, targetLang) {
         },
         { role: "user", content: originalText },
       ],
-      max_tokens: 2048,
+      max_tokens: 8192,
       stream: true,
     });
 

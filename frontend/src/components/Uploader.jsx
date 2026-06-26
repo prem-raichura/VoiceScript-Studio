@@ -4,6 +4,11 @@ import { toast } from 'react-hot-toast'
 import { upload } from '@vercel/blob/client'
 
 const MAX_MB = 1024
+// Whisper hard limit. Files >25 MB are segmented & transcribed locally (in the
+// browser) chunk-by-chunk, so they never touch Vercel Blob — uploading a big
+// file just to delete it would be wasteful and an extra failure point. Only
+// files <=25 MB go to Blob, where the backend fetches and transcribes them.
+const WHISPER_MAX_BYTES = 25 * 1024 * 1024
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 
 /**
@@ -45,6 +50,14 @@ export default function Uploader({ onAudioReady, disabled, selectedFile, onClear
     if (err) { setError(err); return }
     setError('')
     setFile(f)
+
+    // Large file → no upload; it is split & transcribed locally in chunks.
+    if (f.size > WHISPER_MAX_BYTES) {
+      toast.success('File ready — large files are split & transcribed in parts')
+      onAudioReady(f, f.name, null)
+      return
+    }
+
     setUploading(true)
     setUploadProgress(0)
     setUploadStatus('Uploading to storage…')

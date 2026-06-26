@@ -8,13 +8,19 @@
 // NOTE: ffmpeg.wasm runs in 32-bit wasm memory (~2 GB heap ceiling). Very large
 // inputs (roughly >500 MB depending on the browser) may exhaust memory.
 import { FFmpeg } from '@ffmpeg/ffmpeg'
-import { fetchFile, toBlobURL } from '@ffmpeg/util'
+import { fetchFile } from '@ffmpeg/util'
 
-// Single-thread core served same-origin from /public/ffmpeg (copied from
-// @ffmpeg/core's dist/umd). The old unpkg CDN fetch was flaky and failed with
-// "failed to import ffmpeg-core.js". The worker needs the UMD (classic) build
-// for importScripts; ST core needs no cross-origin isolation headers.
-const CORE_BASE = `${import.meta.env.BASE_URL || '/'}ffmpeg`.replace(/\/{2,}/g, '/')
+// Single-thread ESM core served same-origin from /public/ffmpeg (copied from
+// @ffmpeg/core's dist/esm). Vite bundles ffmpeg.wasm's worker as a MODULE
+// worker, so its `importScripts` path is unavailable and it falls back to
+// `await import(coreURL)` — which needs the ESM build (default export
+// createFFmpegCore), not the UMD build. Pass plain same-origin absolute URLs
+// (no toBlobURL): the old unpkg CDN fetch was flaky and threw
+// "failed to import ffmpeg-core.js". ST core needs no cross-origin isolation.
+const CORE_BASE = new URL(
+  `${import.meta.env.BASE_URL || '/'}ffmpeg/`.replace(/\/{2,}/g, '/'),
+  window.location.origin,
+)
 
 // 5-minute mono 16 kHz @ 64 kbps ≈ 2.4 MB per segment — safely under 4.5 MB.
 const SEGMENT_SECONDS = 300
@@ -29,11 +35,10 @@ async function getFFmpeg(onProgress) {
     ffmpeg.on('progress', ({ progress }) => onProgress(Math.min(100, Math.round(progress * 100))))
   }
   try {
-    const [coreURL, wasmURL] = await Promise.all([
-      toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript'),
-      toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm'),
-    ])
-    await ffmpeg.load({ coreURL, wasmURL })
+    await ffmpeg.load({
+      coreURL: new URL('ffmpeg-core.js', CORE_BASE).href,
+      wasmURL: new URL('ffmpeg-core.wasm', CORE_BASE).href,
+    })
   } catch (e) {
     throw new Error(`Failed to load audio engine (ffmpeg.wasm): ${e?.message || e}`)
   }
@@ -79,10 +84,14 @@ export async function segmentAudio(file, onStatus = () => {}) {
   const blobs = []
   for (const name of chunkNames) {
     const data = await ffmpeg.readFile(name)
-    blobs.push(new Blob([data], { type: 'audio/mpeg' }))
+    const blob = new Blob([data], { type: 'audio/mpeg' })
+    // Drop near-empty tail segments (a few hundred bytes of mp3 header from
+    // segment-boundary rounding) — Whisper rejects/empties them. 10 KB ≈ 1.2s.
+    if (blob.size >= 10 * 1024) blobs.push(blob)
     await ffmpeg.deleteFile(name).catch(() => {})
   }
   await ffmpeg.deleteFile(inputName).catch(() => {})
 
+  if (!blobs.length) throw new Error('No usable audio segments were produced.')
   return blobs
 }
