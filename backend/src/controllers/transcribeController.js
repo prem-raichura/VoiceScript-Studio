@@ -147,10 +147,43 @@ exports.transcribeBlob = async (req, res) => {
   }
 };
 
+// ── Google Drive / generic media URL normalization ───────────────────────────
+// A Drive *share* link (file/d/<ID>/view, open?id=<ID>, uc?id=<ID>) returns an
+// HTML page, not bytes. Rewrite to the direct-download endpoint with confirm=t
+// so the virus-scan interstitial is skipped for larger files.
+function normalizeMediaUrl(url) {
+  let id = null;
+  try {
+    const u = new URL(url);
+    if (/(^|\.)drive\.google\.com$/i.test(u.hostname)) {
+      const m = u.pathname.match(/\/file\/d\/([^/]+)/);
+      id = m ? m[1] : u.searchParams.get("id");
+    } else if (/(^|\.)docs\.google\.com$/i.test(u.hostname)) {
+      const m = u.pathname.match(/\/d\/([^/]+)/);
+      id = m ? m[1] : u.searchParams.get("id");
+    }
+  } catch {
+    return url;
+  }
+  if (id) {
+    return `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`;
+  }
+  return url;
+}
+
 // ── Download helper for direct public links ───────────────────────────────────
 async function fetchUrlToBuffer(url) {
   const r = await fetch(url, { redirect: "follow" });
   if (!r.ok) throw new Error(`HTTP ${r.status} while downloading audio`);
+
+  // Guard against HTML interstitials (private Drive file, login/consent page).
+  const ct = (r.headers.get("content-type") || "").toLowerCase();
+  if (ct.startsWith("text/html")) {
+    throw new Error(
+      "Link returned a web page, not an audio file. Make sure the file is shared 'Anyone with the link' and points directly to audio/video."
+    );
+  }
+
   const ab = await r.arrayBuffer();
   return Buffer.from(ab);
 }
@@ -161,20 +194,22 @@ exports.transcribeFromUrl = async (req, res) => {
   const { url, source_lang = "auto", target_lang = "en", action = "translate" } = req.body || {};
   if (!url) return res.status(400).json({ error: "url is required" });
 
+  const fetchUrl = normalizeMediaUrl(url);
+
   let ext = "mp3";
   try { ext = (path.extname(new URL(url).pathname).replace(".", "").toLowerCase()) || "mp3"; } catch {}
 
   try {
     let buffer;
     try {
-      buffer = await fetchUrlToBuffer(url);
+      buffer = await fetchUrlToBuffer(fetchUrl);
     } catch (e) {
       return res.status(502).json({ error: `Failed to download audio: ${e.message}` });
     }
 
     if (buffer.length > WHISPER_MAX_BYTES) {
       return res.status(413).json({
-        error: `File is ${(buffer.length / 1024 / 1024).toFixed(1)} MB — exceeds Whisper's 25 MB limit for URL transcription.`,
+        error: `This file is ${(buffer.length / 1024 / 1024).toFixed(1)} MB — over Whisper's 25 MB limit for links. Download it and upload the file instead (large uploads are split automatically).`,
       });
     }
 

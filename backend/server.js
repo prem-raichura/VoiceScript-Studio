@@ -23,20 +23,47 @@ app.set("trust proxy", 1);
 app.use(helmet());
 app.use(morgan("combined"));
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS
+const allowedOrigins = (process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",")
   : [
       "http://localhost:5173",
       "http://127.0.0.1:5173",
       "https://voice-script-studio.vercel.app",
       "https://voicescript-studio.vercel.app",
-    ];
+    ]
+)
+  .map((o) => o.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
 
-app.use(
-  cors({
-    origin: allowedOrigins,
-  })
-);
+// Dynamic origin check. A plain array origin makes cors send NO
+// Access-Control-Allow-Origin on a miss, which the browser reports as a vague
+// "cross origin" error. Reflecting the origin explicitly (and allowing any
+// *.vercel.app preview deploy) makes failures obvious and previews work.
+function isAllowedOrigin(origin) {
+  if (allowedOrigins.includes(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    if (host.endsWith(".vercel.app")) return true;
+  } catch {
+    /* malformed origin → not allowed */
+  }
+  return false;
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    // No Origin header → curl, health checks, server-to-server. Allow.
+    if (!origin) return callback(null, true);
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    return callback(null, false); // no ACAO header → browser blocks
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(cors(corsOptions));
+// Short-circuit every preflight with the same policy.
+app.options("*", cors(corsOptions));
 
 // Rate limiting. NOTE: on serverless the in-memory store resets per cold
 // instance, so this is best-effort throttling only.

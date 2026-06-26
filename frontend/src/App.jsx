@@ -706,10 +706,20 @@ export default function App() {
     setLastFilename('audio.webm')
     setLastBlobUrl(null)
     setDirectUrl(trimmed)
-    setSourceInfo({ source_type: 'direct_audio', label: 'Direct Audio Link', kind: 'audio', requires_extraction: false })
-    setSourceStatusMessage('Direct link ready — run transcript or translate')
+
+    const isDrive = /(^|\.)drive\.google\.com\//i.test(trimmed) || /(^|\.)docs\.google\.com\//i.test(trimmed)
+    setSourceInfo(
+      isDrive
+        ? { source_type: 'drive_audio', label: 'Drive Audio', kind: 'audio', requires_extraction: false }
+        : { source_type: 'direct_audio', label: 'Direct Audio Link', kind: 'audio', requires_extraction: false },
+    )
+    setSourceStatusMessage(
+      isDrive
+        ? 'Drive link ready — make sure it is shared "Anyone with the link"'
+        : 'Direct link ready — run transcript or translate',
+    )
     setPipeline('input_received', 'Link ready')
-    toast.success('Direct link ready', { duration: 2000 })
+    toast.success(isDrive ? 'Drive link ready' : 'Direct link ready', { duration: 2000 })
   }, [clearResults, lastBlobUrl, setPipeline])
 
   const handleTranscript = useCallback(() => {
