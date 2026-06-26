@@ -20,7 +20,7 @@ export default function History({ items, onSelect, onClear }) {
             onClick={() => onSelect(item)}
             style={{ animationDelay: `${i * 0.05}s` }}
             className="w-full text-left p-3.5 rounded-xl border border-slate-200 bg-slate-50
-                       hover:border-slate-300 hover:bg-slate-50 hover:-transtone-y-0.5
+                       hover:border-slate-300 hover:bg-slate-50 hover:-translate-y-0.5
                        transition-all duration-200 group flex items-start gap-3 shadow-sm animate-slide-up"
           >
             <div className="flex-1 min-w-0">
@@ -32,7 +32,7 @@ export default function History({ items, onSelect, onClear }) {
             </div>
             <ChevronRight
               size={13}
-              className="text-slate-900 group-hover:text-slate-900 flex-shrink-0 mt-1 transition-colors group-hover:transtone-x-0.5 duration-200"
+              className="text-slate-900 group-hover:text-slate-900 flex-shrink-0 mt-1 transition-colors group-hover:translate-x-0.5 duration-200"
             />
           </button>
         ))}

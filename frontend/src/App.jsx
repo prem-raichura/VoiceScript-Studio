@@ -21,9 +21,22 @@ import Uploader from './components/Uploader'
 import TranscriptPanel from './components/TranscriptPanel'
 import LanguageSelector from './components/LanguageSelector'
 import History from './components/History'
+import { segmentAudio } from './utils/clientChunker'
 
-const LARGE_FILE_THRESHOLD_BYTES = 1 * 1024 * 1024
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+// Whisper hard limit. <=25 MB → backend transcribes the blob directly.
+// >25 MB → client-side ffmpeg.wasm segmentation + per-chunk transcription.
+const LARGE_FILE_THRESHOLD_BYTES = 25 * 1024 * 1024
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
+
+// Fire-and-forget removal of a stored blob once we no longer need it.
+function deleteBlob(blobUrl) {
+  if (!blobUrl) return
+  fetch(`${API_BASE}/api/blob/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: blobUrl }),
+  }).catch((err) => console.error('[cleanup] blob delete failed:', err))
+}
 
 const PIPELINE_STEPS = [
   { id: 'input_received', label: '1. Input Received' },
@@ -66,6 +79,35 @@ function normalizeParagraphText(value = '') {
     .map((paragraph) => paragraph.replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .join('\n\n')
+}
+
+// Split a long transcript into word-bounded batches so each translate call
+// stays well under the model's per-request token limit AND the free-tier
+// tokens-per-minute (TPM) cap. A 90-minute transcript can be ~10k+ words; one
+// call exceeds both limits. ~500 words/batch keeps a single request small.
+const TRANSLATE_BATCH_WORDS = 500
+
+function splitTextIntoBatches(text, maxWords = TRANSLATE_BATCH_WORDS) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean)
+  if (words.length <= maxWords) return words.length ? [words.join(' ')] : []
+  const batches = []
+  for (let i = 0; i < words.length; i += maxWords) {
+    batches.push(words.slice(i, i + maxWords).join(' '))
+  }
+  return batches
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Groq returns these when a request is over the per-minute or per-request token
+// budget — retry after a wait rather than failing the whole job.
+const RETRYABLE_TRANSLATE = /rate.?limit|tokens per minute|request too large|\bTPM\b|\b429\b|\b413\b/i
+
+// Pull "try again in 6.2s" from a Groq error; default to a full TPM window.
+function parseRetryMs(msg) {
+  const m = /try again in ([\d.]+)\s*s/i.exec(String(msg || ''))
+  if (m) return Math.ceil(parseFloat(m[1])) * 1000 + 500
+  return 20000
 }
 
 function escapeHtml(value = '') {
@@ -274,7 +316,8 @@ export default function App() {
   const [lastBlob, setLastBlob] = useState(null)
   const [lastFilename, setLastFilename] = useState('audio.webm')
   const [lastAction, setLastAction] = useState('translate')
-  const [lastCloudinaryUrl, setLastCloudinaryUrl] = useState(null)
+  const [lastBlobUrl, setLastBlobUrl] = useState(null)
+  const [directUrl, setDirectUrl] = useState(null)
   const [uploaderKey, setUploaderKey] = useState(0)
 
   const [sourceInfo, setSourceInfo] = useState(null)
@@ -317,17 +360,13 @@ export default function App() {
   }, [])
 
   const resetAll = useCallback(() => {
-    if (lastCloudinaryUrl && lastCloudinaryUrl.startsWith('session://')) {
-      const sessionId = lastCloudinaryUrl.replace('session://', '')
-      fetch(`${API_BASE}/api/upload-session/${sessionId}`, { method: 'DELETE' }).catch((err) =>
-        console.error('[cleanup] Failed to delete session on backend:', err)
-      )
-    }
+    deleteBlob(lastBlobUrl)
     clearResults()
     setLastBlob(null)
     setLastFilename('audio.webm')
     setLastAction('translate')
-    setLastCloudinaryUrl(null)
+    setLastBlobUrl(null)
+    setDirectUrl(null)
     setUploaderKey((k) => k + 1)
     setSourceInfo(null)
     setSourceStatusMessage('')
@@ -336,7 +375,7 @@ export default function App() {
     setSourceExtracting(false)
     setSourceExtractStatus('')
     if (extractPollRef.current) clearInterval(extractPollRef.current)
-  }, [clearResults, lastCloudinaryUrl])
+  }, [clearResults, lastBlobUrl])
 
   const appendHistory = useCallback((entryOriginal, entryTranslation) => {
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -351,91 +390,101 @@ export default function App() {
     ])
   }, [sourceInfo?.label])
 
-  const runTranscription = useCallback(async (blob, filename, action = 'translate') => {
-    clearResults()
-    setLoading(true)
-    setPipeline('transcribe', 'Transcribing...')
+  // ── Streamed, batched translation ────────────────────────────────────────────
+  // Translates `text` to targetLang in small word batches, streaming each batch
+  // into the Translation panel (typewriter feel preserved). Each batch is a
+  // separate short request — this keeps every call under Groq's per-request and
+  // per-minute (TPM) token limits, and retries with backoff when throttled.
+  // Returns the full translation. Appends into setTranslation as it goes.
+  const translateInBatches = useCallback(async (text, controller) => {
+    const batches = splitTextIntoBatches(text)
+    let out = ''
 
-    const controller = new AbortController()
-    abortRef.current = controller
+    for (let b = 0; b < batches.length; b++) {
+      if (controller.signal.aborted) return out
+      const label = batches.length > 1 ? `Translating ${b + 1}/${batches.length}…` : 'Translating…'
+      setPipeline('translate', label)
+      if (b > 0) { out += '\n\n'; setTranslation((prev) => prev + '\n\n') }
 
-    let finalOriginal = ''
-    let finalTranslation = ''
+      let attempt = 0
+      // Retry this batch until it succeeds or we give up.
+      for (;;) {
+        if (controller.signal.aborted) return out
+        let retryMs = 0
+        let batchText = ''
 
-    try {
-      const form = new FormData()
-      form.append('audio', blob, filename)
-      form.append('source_lang', sourceLang)
-      form.append('target_lang', targetLang)
-      form.append('action', action)
+        const tRes = await fetch(`${API_BASE}/api/translate-text`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: batches[b], target_lang: targetLang }),
+          signal: controller.signal,
+        })
 
-      const res = await fetch(`${API_BASE}/api/transcribe`, { method: 'POST', body: form, signal: controller.signal })
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
-        throw new Error(payload.error || `Server error (${res.status})`)
-      }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          let data = null
-          try {
-            data = JSON.parse(line.slice(6))
-          } catch {
-            continue
-          }
-
-          if (data.type === 'meta') {
-            setDuration(data.duration || 0)
-            setDetectedLang(data.detected_lang || '')
-          } else if (data.type === 'original') {
-            finalOriginal = data.text || ''
-            setOriginal(finalOriginal)
-            if (action === 'translate') setPipeline('translate', 'Translating...')
-          } else if (data.type === 'translation_chunk') {
-            if (action === 'translate') setPipeline('translate', 'Translating...')
-            finalTranslation += data.text || ''
-            setTranslation((prev) => prev + (data.text || ''))
-          } else if (data.type === 'error') {
-            throw new Error(data.message || 'Processing failed.')
-          } else if (data.type === 'done') {
-            setPipeline('output', 'Output Generated')
-            setLoading(false)
-            setStatus('')
-            if (finalOriginal || finalTranslation) {
-              appendHistory(finalOriginal, finalTranslation)
-              if (action === 'transcript') {
-                toast.success('Transcription complete!')
-              } else {
-                toast.success('Transcription & translation complete!')
+        if (!tRes.ok) {
+          const p = await tRes.json().catch(() => ({}))
+          const m = (p.error && (p.error.message || p.error)) || `Translation failed (${tRes.status})`
+          if (tRes.status === 429 || tRes.status === 413 || RETRYABLE_TRANSLATE.test(String(m))) retryMs = parseRetryMs(m)
+          else throw new Error(String(m))
+        } else {
+          const reader = tRes.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let errMsg = null
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              let data = null
+              try { data = JSON.parse(line.slice(6)) } catch { continue }
+              if (data.type === 'translation_chunk') {
+                batchText += data.text || ''
+                setTranslation((prev) => prev + (data.text || ''))
+              } else if (data.type === 'error') {
+                errMsg = data.message || 'Translation failed.'
               }
             }
           }
+          if (errMsg) {
+            if (RETRYABLE_TRANSLATE.test(errMsg)) {
+              // Roll back any partial output before retrying the batch.
+              if (batchText) setTranslation((prev) => prev.slice(0, prev.length - batchText.length))
+              retryMs = parseRetryMs(errMsg)
+            } else {
+              throw new Error(errMsg)
+            }
+          }
         }
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        toast.error(err.message?.slice(0, 80) || 'Something went wrong.')
-        setError(err.message || 'Something went wrong.')
-        setLoading(false)
-        setPipelineStep('error')
-      }
-    }
-  }, [appendHistory, clearResults, setPipeline, sourceLang, targetLang])
 
-  // ── URL-based transcription (used when file was uploaded to Cloudinary) ──────
-  // Sends just a URL to the backend — no large file upload to Render.
-  const runTranscribeFromUrl = useCallback(async (cloudinaryUrl, action = 'translate') => {
+        if (retryMs > 0) {
+          attempt++
+          if (attempt > 6) throw new Error('Translation rate limit reached. Wait a minute and retry, or upgrade your Groq tier.')
+          for (let s = Math.ceil(retryMs / 1000); s > 0; s--) {
+            if (controller.signal.aborted) return out
+            setPipeline('translate', `Rate limit — retrying ${b + 1}/${batches.length} in ${s}s…`)
+            await sleep(1000)
+          }
+          continue
+        }
+
+        out += batchText
+        break
+      }
+
+      // Gentle pace between batches to ease the per-minute token budget.
+      if (b < batches.length - 1) await sleep(1500)
+    }
+
+    return out
+  }, [setPipeline, targetLang])
+
+  // ── Transcription from a remote ref ──────────────────────────────────────────
+  // kind 'blob' → file stored in Vercel Blob (backend fetches + deletes it).
+  // kind 'url'  → a direct public audio link.
+  const runTranscribeFromUrl = useCallback(async (sourceRef, action = 'translate', kind = 'blob') => {
     clearResults()
     setLoading(true)
     setPipeline('transcribe', 'Transcribing...')
@@ -446,15 +495,13 @@ export default function App() {
     let finalTranslation = ''
 
     try {
-      // session:// → uploaded via chunked upload to Render (/api/transcribe-session)
-      // https://  → Cloudinary or any HTTPS URL (/api/transcribe-url)
-      const isSession = cloudinaryUrl?.startsWith('session://')
-      const sessionId = isSession ? cloudinaryUrl.replace('session://', '') : null
-
-      const endpoint = isSession ? `${API_BASE}/api/transcribe-session` : `${API_BASE}/api/transcribe-url`
-      const body = isSession
-        ? { session_id: sessionId, filename: lastFilename, source_lang: sourceLang, target_lang: targetLang, action }
-        : { url: cloudinaryUrl, source_lang: sourceLang, target_lang: targetLang, action }
+      const isBlob = kind === 'blob'
+      const endpoint = isBlob ? `${API_BASE}/api/transcribe-blob` : `${API_BASE}/api/transcribe-url`
+      // Always ask the backend for transcript only; translation is done here in
+      // small batches so it never trips Groq's per-request / per-minute limits.
+      const body = isBlob
+        ? { blobUrl: sourceRef, filename: lastFilename, source_lang: sourceLang, action: 'transcript' }
+        : { url: sourceRef, source_lang: sourceLang, action: 'transcript' }
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -466,7 +513,6 @@ export default function App() {
         const payload = await res.json().catch(() => ({}))
         throw new Error(payload.error || `Server error (${res.status})`)
       }
-
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -492,31 +538,33 @@ export default function App() {
           } else if (data.type === 'original') {
             finalOriginal = data.text || ''
             setOriginal(finalOriginal)
-            if (action === 'translate') setPipeline('translate', 'Translating...')
-          } else if (data.type === 'translation_chunk') {
-            if (action === 'translate') setPipeline('translate', 'Translating...')
-            finalTranslation += data.text || ''
-            setTranslation((prev) => prev + (data.text || ''))
           } else if (data.type === 'transcript_chunk') {
             finalOriginal += (finalOriginal ? ' ' : '') + (data.text || '')
             setOriginal(finalOriginal)
           } else if (data.type === 'error') {
-            setLastCloudinaryUrl(null)
+            setLastBlobUrl(null)
             throw new Error(data.message || 'Processing failed.')
-          } else if (data.type === 'done') {
-            setPipeline('output', 'Output Generated')
-            setLoading(false)
-            setStatus('')
-            setLastCloudinaryUrl(null)
-            if (finalOriginal || finalTranslation) {
-              appendHistory(finalOriginal, finalTranslation)
-              toast.success(action === 'transcript' ? 'Transcription complete!' : 'Transcription & translation complete!')
-            }
           }
         }
       }
+
+      setLastBlobUrl(null)
+
+      // Translate the transcript client-side, in batches, if requested.
+      if (action === 'translate' && finalOriginal.trim() && !controller.signal.aborted) {
+        finalTranslation = await translateInBatches(finalOriginal, controller)
+      }
+      if (controller.signal.aborted) return
+
+      setPipeline('output', 'Output Generated')
+      setLoading(false)
+      setStatus('')
+      if (finalOriginal || finalTranslation) {
+        appendHistory(finalOriginal, finalTranslation)
+        toast.success(action === 'transcript' ? 'Transcription complete!' : 'Transcription & translation complete!')
+      }
     } catch (err) {
-      setLastCloudinaryUrl(null)
+      setLastBlobUrl(null)
       if (err.name !== 'AbortError') {
         toast.error(err.message?.slice(0, 80) || 'Processing failed.')
         setError(err.message || 'Processing failed.')
@@ -524,16 +572,19 @@ export default function App() {
         setPipelineStep('error')
       }
     }
-  }, [appendHistory, clearResults, setPipeline, sourceLang, targetLang])
+  }, [appendHistory, clearResults, lastFilename, setPipeline, sourceLang, translateInBatches])
 
-  const runChunkedTranscript = useCallback(async (blob, filename) => {
+  // Large file (>25 MB): segment locally with ffmpeg.wasm, transcribe each
+  // small chunk via /api/transcribe-chunk, then optionally translate.
+  const runChunkedTranscript = useCallback(async (file, filename, action = 'transcript', blobUrl = null) => {
     clearResults()
     setLoading(true)
-    setPipeline('transcribe', 'Transcribing...')
+    setPipeline('transcribe', 'Preparing audio…')
 
     const controller = new AbortController()
     abortRef.current = controller
     let finalOriginalText = ''
+    let finalTranslation = ''
     let appendQueue = Promise.resolve()
 
     const WORDS_PER_TICK = 14
@@ -541,15 +592,10 @@ export default function App() {
     const appendWithTyping = (text) => {
       const words = (text || '').trim().split(/\s+/).filter(Boolean)
       if (!words.length) return Promise.resolve()
-
       return new Promise((resolve) => {
         let i = 0
         const timer = setInterval(() => {
-          if (controller.signal.aborted) {
-            clearInterval(timer)
-            resolve()
-            return
-          }
+          if (controller.signal.aborted) { clearInterval(timer); resolve(); return }
           const chunk = words.slice(i, i + WORDS_PER_TICK).join(' ')
           if (chunk) {
             setOriginal((prev) => {
@@ -559,83 +605,74 @@ export default function App() {
             })
           }
           i += WORDS_PER_TICK
-          if (i >= words.length) {
-            clearInterval(timer)
-            resolve()
-          }
+          if (i >= words.length) { clearInterval(timer); resolve() }
         }, TICK_MS)
       })
     }
 
     try {
-      const form = new FormData()
-      form.append('audio', blob, filename)
-      form.append('source_lang', sourceLang)
+      // 1. Segment locally (no server ffmpeg, no upload of the big file body).
+      const segments = await segmentAudio(file, (stage, pct) => {
+        setPipeline('transcribe', pct != null ? `${stage} ${pct}%` : stage)
+      })
+      if (controller.signal.aborted) return
 
-      const res = await fetch(`${API_BASE}/api/transcribe-large`, { method: 'POST', body: form, signal: controller.signal })
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
-        throw new Error(payload.error || `Server error (${res.status})`)
-      }
+      const total = segments.length
+      let durationTotal = 0
+      let detected = ''
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let finished = false
+      // 2. Transcribe each chunk in order.
+      for (let i = 0; i < total; i++) {
+        if (controller.signal.aborted) return
+        setPipeline('transcribe', `Transcribing ${i + 1}/${total} parts…`)
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        const form = new FormData()
+        form.append('audio', segments[i], `chunk_${String(i).padStart(3, '0')}.mp3`)
+        form.append('source_lang', sourceLang)
+        form.append('index', String(i))
+        form.append('total', String(total))
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          let data = null
-          try {
-            data = JSON.parse(line.slice(6))
-          } catch {
-            continue
-          }
-
-          if (data.type === 'progress') {
-            setPipeline('transcribe', data.message || 'Transcribing...')
-          } else if (data.type === 'transcript_chunk') {
-            appendQueue = appendQueue.then(() => appendWithTyping(data.text || ''))
-          } else if (data.type === 'meta') {
-            setDuration(data.duration || 0)
-            setDetectedLang(data.detected_lang || '')
-          } else if (data.type === 'error') {
-            throw new Error(data.message || 'Large transcription failed.')
-          } else if (data.type === 'done') {
-            finished = true
-            await appendQueue
-            setPipeline('output', 'Output Generated')
-            setLoading(false)
-            setStatus('')
-            if (finalOriginalText) {
-              appendHistory(finalOriginalText, '')
-              toast.success('Large-file transcription complete!')
-            }
-          }
+        const res = await fetch(`${API_BASE}/api/transcribe-chunk`, { method: 'POST', body: form, signal: controller.signal })
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}))
+          throw new Error(payload.error || `Chunk ${i + 1} failed (${res.status})`)
         }
+        const data = await res.json()
+        if (!detected && data.detected_lang) { detected = data.detected_lang; setDetectedLang(detected) }
+        durationTotal += data.duration || 0
+        setDuration(Math.round(durationTotal * 10) / 10)
+        appendQueue = appendQueue.then(() => appendWithTyping(data.text || ''))
       }
+      await appendQueue
 
-      if (!finished) {
-        await appendQueue
-        setLoading(false)
-        setStatus('')
+      // 3. Optional translation of the assembled transcript (batched + throttled).
+      if (action === 'translate' && finalOriginalText.trim() && !controller.signal.aborted) {
+        finalTranslation = await translateInBatches(finalOriginalText, controller)
       }
+      if (controller.signal.aborted) return
+
+      setPipeline('output', 'Output Generated')
+      setLoading(false)
+      setStatus('')
+      if (finalOriginalText) {
+        appendHistory(finalOriginalText, finalTranslation)
+        toast.success(action === 'translate' ? 'Transcription & translation complete!' : 'Large-file transcription complete!')
+      }
+      deleteBlob(blobUrl)
+      setLastBlobUrl(null)
     } catch (err) {
+      deleteBlob(blobUrl)
+      setLastBlobUrl(null)
       if (err.name !== 'AbortError') {
-        toast.error(err.message?.slice(0, 80) || 'Large-file transcription failed.')
-        setError(err.message || 'Large-file transcription failed.')
+        const msg = err?.message || String(err) || 'Large-file transcription failed.'
+        console.error('[large-file] failed:', err)
+        toast.error(msg.slice(0, 100))
+        setError(msg)
         setLoading(false)
         setPipelineStep('error')
       }
     }
-  }, [appendHistory, clearResults, setPipeline, sourceLang])
+  }, [appendHistory, clearResults, setPipeline, sourceLang, translateInBatches])
 
   const runTextTranslation = useCallback(async (text) => {
     const inputText = (text || '').trim()
@@ -649,62 +686,17 @@ export default function App() {
 
     const controller = new AbortController()
     abortRef.current = controller
-    let finalTranslation = ''
 
     try {
-      const res = await fetch(`${API_BASE}/api/transtone-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: inputText, target_lang: targetLang }),
-        signal: controller.signal,
-      })
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
-        throw new Error(payload.error || `Server error (${res.status})`)
-      }
+      const finalTranslation = await translateInBatches(inputText, controller)
+      if (controller.signal.aborted) return
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let finished = false
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          let data = null
-          try {
-            data = JSON.parse(line.slice(6))
-          } catch {
-            continue
-          }
-
-          if (data.type === 'translation_chunk') {
-            finalTranslation += data.text || ''
-            setTranslation((prev) => prev + (data.text || ''))
-          } else if (data.type === 'error') {
-            throw new Error(data.message || 'Translation failed.')
-          } else if (data.type === 'done') {
-            finished = true
-            setPipeline('output', 'Output Generated')
-            setLoading(false)
-            setStatus('')
-            if (inputText || finalTranslation) {
-              appendHistory(inputText, finalTranslation)
-              toast.success('Translation complete!')
-            }
-          }
-        }
-      }
-
-      if (!finished) {
-        setLoading(false)
-        setStatus('')
+      setPipeline('output', 'Output Generated')
+      setLoading(false)
+      setStatus('')
+      if (inputText || finalTranslation) {
+        appendHistory(inputText, finalTranslation)
+        toast.success('Translation complete!')
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -714,20 +706,14 @@ export default function App() {
         setPipelineStep('error')
       }
     }
-  }, [appendHistory, setPipeline, targetLang])
+  }, [appendHistory, setPipeline, translateInBatches])
 
-
-
-  const handleAudioUpload = useCallback((blob, filename = 'audio.webm', cloudinaryUrl = null) => {
-    if (lastCloudinaryUrl && lastCloudinaryUrl.startsWith('session://')) {
-      const oldSessionId = lastCloudinaryUrl.replace('session://', '')
-      fetch(`${API_BASE}/api/upload-session/${oldSessionId}`, { method: 'DELETE' }).catch((err) =>
-        console.error('[cleanup] Failed to delete old session:', err)
-      )
-    }
+  const handleAudioUpload = useCallback((blob, filename = 'audio.webm', blobUrl = null) => {
+    deleteBlob(lastBlobUrl)
+    setDirectUrl(null)
     setLastBlob(blob)
     setLastFilename(filename)
-    setLastCloudinaryUrl(cloudinaryUrl)
+    setLastBlobUrl(blobUrl)
     setSourceInfo({
       source_type: 'direct_audio',
       label: 'Direct Audio',
@@ -741,199 +727,82 @@ export default function App() {
     setSourceExtracting(false)
     setSourceExtractStatus('')
     toast.success(`File loaded: ${filename}`, { duration: 2000 })
-  }, [lastCloudinaryUrl])
+  }, [lastBlobUrl])
 
   const clearSelectedAudio = useCallback(() => {
-    if (lastCloudinaryUrl && lastCloudinaryUrl.startsWith('session://')) {
-      const sessionId = lastCloudinaryUrl.replace('session://', '')
-      fetch(`${API_BASE}/api/upload-session/${sessionId}`, { method: 'DELETE' }).catch((err) =>
-        console.error('[cleanup] Failed to delete session on backend:', err)
-      )
-    }
+    deleteBlob(lastBlobUrl)
     setLastBlob(null)
     setLastFilename('audio.webm')
-    setLastCloudinaryUrl(null)
+    setLastBlobUrl(null)
+    setDirectUrl(null)
     setSourceStatusMessage('')
-  }, [lastCloudinaryUrl])
+  }, [lastBlobUrl])
 
-  // ── URL Source Detection & Audio Extraction ────────────────────────────────
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => { if (extractPollRef.current) clearInterval(extractPollRef.current) }
-  }, [])
-
-  const handleDetectAndExtract = useCallback(async (url) => {
+  // ── Direct public audio link ────────────────────────────────────────────────
+  // yt-dlp / Drive extraction was removed (not possible on serverless). We now
+  // accept only direct public audio URLs, transcribed via /api/transcribe-url.
+  const handleDetectAndExtract = useCallback((url) => {
     const trimmed = (url || '').trim()
     if (!trimmed) { toast.error('Please enter a URL'); return }
+    if (!/^https?:\/\//i.test(trimmed)) { toast.error('Enter a valid http(s) audio link'); return }
 
-    // Clear previous state
     clearResults()
+    deleteBlob(lastBlobUrl)
     setLastBlob(null)
     setLastFilename('audio.webm')
-    setLastCloudinaryUrl(null)
-    setSourceInfo(null)
-    setSourceStatusMessage('')
-    setSourceExtracting(false)
-    setSourceExtractStatus('')
-    if (extractPollRef.current) clearInterval(extractPollRef.current)
+    setLastBlobUrl(null)
+    setDirectUrl(trimmed)
 
-    // Step 1: Detect source
-    setPipeline('input_received', 'Input received')
-    setSourceDetecting(true)
-    setSourceStatusMessage('Detecting source…')
-
-    let detected
-    try {
-      const res = await fetch(`${API_BASE}/api/detect-source`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmed }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.error || `Detection failed (${res.status})`)
-      }
-      detected = await res.json()
-    } catch (err) {
-      setSourceDetecting(false)
-      setSourceStatusMessage('')
-      toast.error(err.message?.slice(0, 100) || 'Source detection failed')
-      return
-    }
-
-    setSourceDetecting(false)
-    setSourceInfo({
-      source_type: detected.source_type,
-      label: detected.label,
-      kind: detected.kind,
-      requires_extraction: detected.requires_extraction,
-    })
-    setSourceStatusMessage(`Detected: ${detected.label}`)
-    toast.success(`Source detected: ${detected.label}`, { duration: 2000 })
-    setPipeline('source_detection', 'Source detected')
-
-    // Step 2: Extract audio
-    setPipeline('extraction', 'Extracting audio…')
-    setSourceExtracting(true)
-    setSourceExtractStatus('Starting extraction…')
-
-    let jobId
-    try {
-      const res = await fetch(`${API_BASE}/api/extract-audio-url`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmed }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.error || `Extraction failed (${res.status})`)
-      }
-      const data = await res.json()
-      jobId = data.job_id
-    } catch (err) {
-      setSourceExtracting(false)
-      setSourceExtractStatus('')
-      setSourceStatusMessage(`Detection OK, but extraction failed`)
-      toast.error(err.message?.slice(0, 100) || 'Audio extraction failed')
-      return
-    }
-
-    // Step 3: Poll for extraction completion
-    extractPollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/extract-audio-url/status/${jobId}`)
-        if (!res.ok) throw new Error('Polling failed')
-        const status = await res.json()
-
-        setSourceExtractStatus(status.message || 'Processing…')
-
-        if (status.status === 'ready') {
-          clearInterval(extractPollRef.current)
-          extractPollRef.current = null
-          setSourceExtractStatus('Downloading audio…')
-
-          // Download the extracted audio blob
-          try {
-            const dlRes = await fetch(`${API_BASE}/api/extract-audio-url/download/${jobId}`)
-            if (!dlRes.ok) throw new Error('Download failed')
-
-            const disposition = dlRes.headers.get('content-disposition')
-            const filename = parseDispositionFilename(disposition)
-            const blob = await dlRes.blob()
-
-            setLastBlob(blob)
-            setLastFilename(filename)
-            setLastCloudinaryUrl(null)
-            setSourceExtracting(false)
-            setSourceExtractStatus('')
-            setSourceStatusMessage(`Audio ready: ${filename}`)
-            setPipeline('transcribe', 'Ready to Transcribe')
-            toast.success(`Audio extracted: ${filename}`, { duration: 3000 })
-          } catch (dlErr) {
-            setSourceExtracting(false)
-            setSourceExtractStatus('')
-            setSourceStatusMessage('Extraction completed but download failed')
-            toast.error(dlErr.message?.slice(0, 100) || 'Audio download failed')
-          }
-        } else if (status.status === 'error') {
-          clearInterval(extractPollRef.current)
-          extractPollRef.current = null
-          setSourceExtracting(false)
-          setSourceExtractStatus('')
-          setSourceStatusMessage('Audio extraction failed')
-          toast.error(status.error || 'Audio extraction failed')
-        }
-      } catch (err) {
-        // Network error during poll — keep trying
-        console.warn('[extract-poll] error:', err.message)
-      }
-    }, 2000)
-  }, [clearResults, setPipeline])
+    const isDrive = /(^|\.)drive\.google\.com\//i.test(trimmed) || /(^|\.)docs\.google\.com\//i.test(trimmed)
+    setSourceInfo(
+      isDrive
+        ? { source_type: 'drive_audio', label: 'Drive Audio', kind: 'audio', requires_extraction: false }
+        : { source_type: 'direct_audio', label: 'Direct Audio Link', kind: 'audio', requires_extraction: false },
+    )
+    setSourceStatusMessage(
+      isDrive
+        ? 'Drive link ready — make sure it is shared "Anyone with the link"'
+        : 'Direct link ready — run transcript or translate',
+    )
+    setPipeline('input_received', 'Link ready')
+    toast.success(isDrive ? 'Drive link ready' : 'Direct link ready', { duration: 2000 })
+  }, [clearResults, lastBlobUrl, setPipeline])
 
   const handleTranscript = useCallback(() => {
-    if (!lastBlob || busy) return
+    if (busy) return
     setLastAction('transcript')
-    // If file was uploaded to Cloudinary, use URL-based endpoint (no large upload to Render)
-    if (lastCloudinaryUrl) {
-      runTranscribeFromUrl(lastCloudinaryUrl, 'transcript')
-      return
-    }
+    if (directUrl) { runTranscribeFromUrl(directUrl, 'transcript', 'url'); return }
+    if (!lastBlob) return
     if (lastBlob.size > LARGE_FILE_THRESHOLD_BYTES) {
-      runChunkedTranscript(lastBlob, lastFilename)
+      runChunkedTranscript(lastBlob, lastFilename, 'transcript', lastBlobUrl)
     } else {
-      runTranscription(lastBlob, lastFilename, 'transcript')
+      runTranscribeFromUrl(lastBlobUrl, 'transcript', 'blob')
     }
-  }, [busy, lastBlob, lastCloudinaryUrl, lastFilename, runChunkedTranscript, runTranscribeFromUrl, runTranscription])
+  }, [busy, directUrl, lastBlob, lastBlobUrl, lastFilename, runChunkedTranscript, runTranscribeFromUrl])
 
   const handleTranslate = useCallback(() => {
     if (busy) return
     setLastAction('translate')
-    if ((original || '').trim()) {
-      runTextTranslation(original)
-      return
+    if ((original || '').trim()) { runTextTranslation(original); return }
+    if (directUrl) { runTranscribeFromUrl(directUrl, 'translate', 'url'); return }
+    if (!lastBlob) return
+    if (lastBlob.size > LARGE_FILE_THRESHOLD_BYTES) {
+      runChunkedTranscript(lastBlob, lastFilename, 'translate', lastBlobUrl)
+    } else {
+      runTranscribeFromUrl(lastBlobUrl, 'translate', 'blob')
     }
-    // If file was uploaded to Cloudinary, use URL-based endpoint
-    if (lastCloudinaryUrl) {
-      runTranscribeFromUrl(lastCloudinaryUrl, 'translate')
-      return
-    }
-    if (lastBlob) runTranscription(lastBlob, lastFilename, 'translate')
-  }, [busy, lastBlob, lastCloudinaryUrl, lastFilename, original, runTextTranslation, runTranscribeFromUrl, runTranscription])
+  }, [busy, directUrl, lastBlob, lastBlobUrl, lastFilename, original, runTextTranslation, runChunkedTranscript, runTranscribeFromUrl])
 
   const handleRetry = useCallback(() => {
-    if (!lastBlob && !(original || '').trim()) return
-    if (lastAction === 'translate' && (original || '').trim()) {
-      runTextTranslation(original)
-      return
-    }
+    if (lastAction === 'translate' && (original || '').trim()) { runTextTranslation(original); return }
+    if (directUrl) { runTranscribeFromUrl(directUrl, lastAction, 'url'); return }
     if (!lastBlob) return
-    if (lastAction === 'transcript' && lastBlob.size > LARGE_FILE_THRESHOLD_BYTES) {
-      runChunkedTranscript(lastBlob, lastFilename)
-      return
+    if (lastBlob.size > LARGE_FILE_THRESHOLD_BYTES) {
+      runChunkedTranscript(lastBlob, lastFilename, lastAction, lastBlobUrl)
+    } else {
+      runTranscribeFromUrl(lastBlobUrl, lastAction, 'blob')
     }
-    runTranscription(lastBlob, lastFilename, lastAction)
-  }, [lastAction, lastBlob, lastFilename, original, runChunkedTranscript, runTextTranslation, runTranscription])
+  }, [directUrl, lastAction, lastBlob, lastBlobUrl, lastFilename, original, runChunkedTranscript, runTextTranslation, runTranscribeFromUrl])
 
   const exportBundle = useCallback((entries, includeOriginal, includeTranslation) => {
     const now = new Date()
@@ -1148,20 +1017,20 @@ export default function App() {
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-900/50">Source URL</p>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 relative">
-                      <Link2 size={15} className="absolute left-3.5 top-1/2 -transtone-y-1/2 text-slate-900/50 pointer-events-none" />
+                      <Link2 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-900/50 pointer-events-none" />
                       <input
                         type="url"
                         value={sourceUrl}
                         onChange={(e) => setSourceUrl(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !busy && !sourceDetecting && !sourceExtracting) handleDetectAndExtract(sourceUrl) }}
-                        placeholder="https://drive.google.com/file/d/..."
+                        placeholder="https://example.com/audio.mp3"
                         disabled={busy || sourceDetecting || sourceExtracting}
                         className="input-url w-full"
                       />
                       {sourceUrl && !sourceDetecting && !sourceExtracting && (
                         <button
                           onClick={() => { setSourceUrl(''); setSourceStatusMessage(''); setSourceInfo(null) }}
-                          className="absolute right-3 top-1/2 -transtone-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-slate-900/50 hover:text-slate-900/80 hover:bg-slate-50 transition-all"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-slate-900/50 hover:text-slate-900/80 hover:bg-slate-50 transition-all"
                         >
                           <X size={12} />
                         </button>
@@ -1178,7 +1047,7 @@ export default function App() {
                       {sourceDetecting || sourceExtracting ? (
                         <><Loader2 size={14} className="animate-spin" /> <span>Working</span></>
                       ) : (
-                        <><ExternalLink size={14} /> <span>Extract</span></>
+                        <><ExternalLink size={14} /> <span>Use Link</span></>
                       )}
                     </button>
                   </div>
