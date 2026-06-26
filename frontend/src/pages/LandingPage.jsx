@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import {
   ArrowRight,
   Languages,
@@ -13,6 +13,8 @@ import {
   FileText,
   AudioLines,
 } from 'lucide-react'
+
+const HeroWave3D = lazy(() => import('../components/HeroWave3D'))
 
 /* ── Palette (Halo USD) ───────────────────────────────────
    bg lavender   #EBE7F2
@@ -143,26 +145,6 @@ function Ticker() {
   )
 }
 
-/* Animated waveform bars for hero visual */
-function Waveform() {
-  const bars = [28, 46, 70, 40, 88, 56, 100, 64, 38, 76, 50, 92, 44, 68, 34, 80, 52, 96, 42, 60]
-  return (
-    <div className="flex items-center justify-center gap-[5px] h-28">
-      {bars.map((h, i) => (
-        <span
-          key={i}
-          className="w-[5px] rounded-full animate-wave"
-          style={{
-            height: `${h}%`,
-            background: `linear-gradient(180deg, ${C.accentLight}, ${C.accent})`,
-            animationDelay: `${i * 0.08}s`,
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
 /* ── Main ─────────────────────────────────────────────── */
 
 export default function LandingPage({ onStart }) {
@@ -246,41 +228,37 @@ export default function LandingPage({ onStart }) {
           </div>
         </div>
 
-        {/* Hero visual card */}
+        {/* Hero 3D visual */}
         <div className="flex-1 w-full max-w-md lg:max-w-none relative animate-fade-in" style={{ animationDelay: '0.4s' }}>
-          <div className="relative rounded-[1.75rem] p-7 animate-float overflow-hidden" style={{ background: `linear-gradient(150deg, ${C.dark} 0%, ${C.dark2} 100%)`, boxShadow: '0 30px 70px rgba(39,33,64,0.35)' }}>
-            <div className="absolute -top-16 -right-16 w-52 h-52 rounded-full blur-3xl" style={{ background: 'rgba(126,111,179,0.45)' }} />
-            <div className="relative">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(169,155,212,0.25)' }}>
-                    <AudioLines size={17} style={{ color: C.accentLight }} />
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-semibold">interview.mp3</p>
-                    <p className="text-[11px]" style={{ color: '#9D95BC' }}>Transcribing…</p>
-                  </div>
-                </div>
-                <span className="px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: C.accent, color: 'white' }}>LIVE</span>
-              </div>
+          <div className="relative rounded-[1.75rem] overflow-hidden h-[440px] sm:h-[500px]" style={{ background: `linear-gradient(150deg, ${C.dark} 0%, ${C.dark2} 100%)`, boxShadow: '0 30px 70px rgba(39,33,64,0.35)' }}>
+            <div className="absolute -top-16 -right-16 w-52 h-52 rounded-full blur-3xl pointer-events-none" style={{ background: 'rgba(126,111,179,0.45)' }} />
 
-              <div className="rounded-2xl p-5 mb-5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(169,155,212,0.18)' }}>
-                <Waveform />
-              </div>
+            {/* 3D soundwave canvas */}
+            <div className="absolute inset-0">
+              <Suspense fallback={<div className="w-full h-full flex items-center justify-center"><div className="flex items-end gap-1.5 h-20">{[40, 70, 100, 55, 85, 45, 75].map((h, i) => (<span key={i} className="w-2 rounded-full animate-wave" style={{ height: `${h}%`, background: C.accentLight, animationDelay: `${i * 0.1}s` }} />))}</div></div>}>
+                <HeroWave3D />
+              </Suspense>
+            </div>
 
-              <div className="space-y-3">
-                <div className="h-2.5 rounded-full w-full" style={{ background: 'rgba(169,155,212,0.35)' }} />
-                <div className="h-2.5 rounded-full w-5/6" style={{ background: 'rgba(169,155,212,0.22)' }} />
-                <div className="h-2.5 rounded-full w-4/6" style={{ background: 'rgba(169,155,212,0.15)' }} />
+            {/* Overlay: file label */}
+            <div className="absolute top-5 left-5 flex items-center gap-2.5 pointer-events-none">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center backdrop-blur-sm" style={{ background: 'rgba(169,155,212,0.25)' }}>
+                <AudioLines size={17} style={{ color: C.accentLight }} />
               </div>
+              <div>
+                <p className="text-white text-sm font-semibold">interview.mp3</p>
+                <p className="text-[11px]" style={{ color: '#C9C2E0' }}>Transcribing…</p>
+              </div>
+            </div>
+            <span className="absolute top-6 right-5 px-2.5 py-1 rounded-full text-[10px] font-bold pointer-events-none" style={{ background: C.accent, color: 'white' }}>LIVE</span>
 
-              <div className="mt-6 flex items-center gap-3 rounded-xl p-3" style={{ background: 'rgba(245,242,235,0.95)' }}>
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.cardLight }}>
-                  <Globe size={14} style={{ color: C.accent }} />
-                </div>
-                <p className="text-xs font-medium flex-1" style={{ color: C.text }}>Translated to 13 languages</p>
-                <CheckCircle2 size={16} style={{ color: C.accent }} />
+            {/* Overlay: translate badge */}
+            <div className="absolute bottom-5 left-5 right-5 flex items-center gap-3 rounded-xl p-3 backdrop-blur-md pointer-events-none" style={{ background: 'rgba(245,242,235,0.92)' }}>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.cardLight }}>
+                <Globe size={14} style={{ color: C.accent }} />
               </div>
+              <p className="text-xs font-medium flex-1" style={{ color: C.text }}>Translated to 13 languages</p>
+              <CheckCircle2 size={16} style={{ color: C.accent }} />
             </div>
           </div>
         </div>
@@ -460,17 +438,18 @@ export default function LandingPage({ onStart }) {
 
       {/* ── Footer ── */}
       <footer className="px-6 py-12 border-t" style={{ borderColor: '#D6CEE9' }}>
-        <Reveal dir="up" className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-5">
-          <div className="flex items-center gap-2.5">
+        <Reveal dir="up" className="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-3 items-center gap-4 text-center">
+          <div className="flex items-center justify-center sm:justify-start gap-2.5">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.dark }}>
               <Mic size={13} className="text-white" />
             </div>
             <span className="font-bold" style={{ color: C.text }}>VoiceScript</span>
           </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-x-2 gap-y-1 text-sm font-medium text-center sm:text-left" style={{ color: C.muted }}>
-            <span>Powered by Groq Whisper</span>
-            <span className="hidden sm:inline" style={{ color: '#C7BFDD' }}>·</span>
-            <span className="font-semibold" style={{ color: C.accent }}>Built by Team Shrikhand</span>
+          <div className="text-sm font-semibold order-first sm:order-none" style={{ color: C.accent }}>
+            Built by Team Shrikhand
+          </div>
+          <div className="text-sm font-medium sm:text-right" style={{ color: C.muted }}>
+            Powered by Groq Whisper
           </div>
         </Reveal>
       </footer>
