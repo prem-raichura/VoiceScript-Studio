@@ -82,9 +82,12 @@ function normalizeParagraphText(value = '') {
 }
 
 // Split a long transcript into word-bounded batches so each translate call
-// stays well under the model's output-token limit. A 90-minute transcript can
-// be ~10k+ words; one call would truncate. ~1200 words ≈ safe per request.
-function splitTextIntoBatches(text, maxWords = 1200) {
+// stays well under the model's per-request token limit AND the free-tier
+// tokens-per-minute (TPM) cap. A 90-minute transcript can be ~10k+ words; one
+// call exceeds both limits. ~500 words/batch keeps a single request small.
+const TRANSLATE_BATCH_WORDS = 500
+
+function splitTextIntoBatches(text, maxWords = TRANSLATE_BATCH_WORDS) {
   const words = String(text || '').trim().split(/\s+/).filter(Boolean)
   if (words.length <= maxWords) return words.length ? [words.join(' ')] : []
   const batches = []
@@ -92,6 +95,19 @@ function splitTextIntoBatches(text, maxWords = 1200) {
     batches.push(words.slice(i, i + maxWords).join(' '))
   }
   return batches
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Groq returns these when a request is over the per-minute or per-request token
+// budget — retry after a wait rather than failing the whole job.
+const RETRYABLE_TRANSLATE = /rate.?limit|tokens per minute|request too large|\bTPM\b|\b429\b|\b413\b/i
+
+// Pull "try again in 6.2s" from a Groq error; default to a full TPM window.
+function parseRetryMs(msg) {
+  const m = /try again in ([\d.]+)\s*s/i.exec(String(msg || ''))
+  if (m) return Math.ceil(parseFloat(m[1])) * 1000 + 500
+  return 20000
 }
 
 function escapeHtml(value = '') {
@@ -374,6 +390,97 @@ export default function App() {
     ])
   }, [sourceInfo?.label])
 
+  // ── Streamed, batched translation ────────────────────────────────────────────
+  // Translates `text` to targetLang in small word batches, streaming each batch
+  // into the Translation panel (typewriter feel preserved). Each batch is a
+  // separate short request — this keeps every call under Groq's per-request and
+  // per-minute (TPM) token limits, and retries with backoff when throttled.
+  // Returns the full translation. Appends into setTranslation as it goes.
+  const translateInBatches = useCallback(async (text, controller) => {
+    const batches = splitTextIntoBatches(text)
+    let out = ''
+
+    for (let b = 0; b < batches.length; b++) {
+      if (controller.signal.aborted) return out
+      const label = batches.length > 1 ? `Translating ${b + 1}/${batches.length}…` : 'Translating…'
+      setPipeline('translate', label)
+      if (b > 0) { out += '\n\n'; setTranslation((prev) => prev + '\n\n') }
+
+      let attempt = 0
+      // Retry this batch until it succeeds or we give up.
+      for (;;) {
+        if (controller.signal.aborted) return out
+        let retryMs = 0
+        let batchText = ''
+
+        const tRes = await fetch(`${API_BASE}/api/translate-text`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: batches[b], target_lang: targetLang }),
+          signal: controller.signal,
+        })
+
+        if (!tRes.ok) {
+          const p = await tRes.json().catch(() => ({}))
+          const m = (p.error && (p.error.message || p.error)) || `Translation failed (${tRes.status})`
+          if (tRes.status === 429 || tRes.status === 413 || RETRYABLE_TRANSLATE.test(String(m))) retryMs = parseRetryMs(m)
+          else throw new Error(String(m))
+        } else {
+          const reader = tRes.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let errMsg = null
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              let data = null
+              try { data = JSON.parse(line.slice(6)) } catch { continue }
+              if (data.type === 'translation_chunk') {
+                batchText += data.text || ''
+                setTranslation((prev) => prev + (data.text || ''))
+              } else if (data.type === 'error') {
+                errMsg = data.message || 'Translation failed.'
+              }
+            }
+          }
+          if (errMsg) {
+            if (RETRYABLE_TRANSLATE.test(errMsg)) {
+              // Roll back any partial output before retrying the batch.
+              if (batchText) setTranslation((prev) => prev.slice(0, prev.length - batchText.length))
+              retryMs = parseRetryMs(errMsg)
+            } else {
+              throw new Error(errMsg)
+            }
+          }
+        }
+
+        if (retryMs > 0) {
+          attempt++
+          if (attempt > 6) throw new Error('Translation rate limit reached. Wait a minute and retry, or upgrade your Groq tier.')
+          for (let s = Math.ceil(retryMs / 1000); s > 0; s--) {
+            if (controller.signal.aborted) return out
+            setPipeline('translate', `Rate limit — retrying ${b + 1}/${batches.length} in ${s}s…`)
+            await sleep(1000)
+          }
+          continue
+        }
+
+        out += batchText
+        break
+      }
+
+      // Gentle pace between batches to ease the per-minute token budget.
+      if (b < batches.length - 1) await sleep(1500)
+    }
+
+    return out
+  }, [setPipeline, targetLang])
+
   // ── Transcription from a remote ref ──────────────────────────────────────────
   // kind 'blob' → file stored in Vercel Blob (backend fetches + deletes it).
   // kind 'url'  → a direct public audio link.
@@ -390,9 +497,11 @@ export default function App() {
     try {
       const isBlob = kind === 'blob'
       const endpoint = isBlob ? `${API_BASE}/api/transcribe-blob` : `${API_BASE}/api/transcribe-url`
+      // Always ask the backend for transcript only; translation is done here in
+      // small batches so it never trips Groq's per-request / per-minute limits.
       const body = isBlob
-        ? { blobUrl: sourceRef, filename: lastFilename, source_lang: sourceLang, target_lang: targetLang, action }
-        : { url: sourceRef, source_lang: sourceLang, target_lang: targetLang, action }
+        ? { blobUrl: sourceRef, filename: lastFilename, source_lang: sourceLang, action: 'transcript' }
+        : { url: sourceRef, source_lang: sourceLang, action: 'transcript' }
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -404,7 +513,6 @@ export default function App() {
         const payload = await res.json().catch(() => ({}))
         throw new Error(payload.error || `Server error (${res.status})`)
       }
-
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -430,28 +538,30 @@ export default function App() {
           } else if (data.type === 'original') {
             finalOriginal = data.text || ''
             setOriginal(finalOriginal)
-            if (action === 'translate') setPipeline('translate', 'Translating...')
-          } else if (data.type === 'translation_chunk') {
-            if (action === 'translate') setPipeline('translate', 'Translating...')
-            finalTranslation += data.text || ''
-            setTranslation((prev) => prev + (data.text || ''))
           } else if (data.type === 'transcript_chunk') {
             finalOriginal += (finalOriginal ? ' ' : '') + (data.text || '')
             setOriginal(finalOriginal)
           } else if (data.type === 'error') {
             setLastBlobUrl(null)
             throw new Error(data.message || 'Processing failed.')
-          } else if (data.type === 'done') {
-            setPipeline('output', 'Output Generated')
-            setLoading(false)
-            setStatus('')
-            setLastBlobUrl(null)
-            if (finalOriginal || finalTranslation) {
-              appendHistory(finalOriginal, finalTranslation)
-              toast.success(action === 'transcript' ? 'Transcription complete!' : 'Transcription & translation complete!')
-            }
           }
         }
+      }
+
+      setLastBlobUrl(null)
+
+      // Translate the transcript client-side, in batches, if requested.
+      if (action === 'translate' && finalOriginal.trim() && !controller.signal.aborted) {
+        finalTranslation = await translateInBatches(finalOriginal, controller)
+      }
+      if (controller.signal.aborted) return
+
+      setPipeline('output', 'Output Generated')
+      setLoading(false)
+      setStatus('')
+      if (finalOriginal || finalTranslation) {
+        appendHistory(finalOriginal, finalTranslation)
+        toast.success(action === 'transcript' ? 'Transcription complete!' : 'Transcription & translation complete!')
       }
     } catch (err) {
       setLastBlobUrl(null)
@@ -462,7 +572,7 @@ export default function App() {
         setPipelineStep('error')
       }
     }
-  }, [appendHistory, clearResults, lastFilename, setPipeline, sourceLang, targetLang])
+  }, [appendHistory, clearResults, lastFilename, setPipeline, sourceLang, translateInBatches])
 
   // Large file (>25 MB): segment locally with ffmpeg.wasm, transcribe each
   // small chunk via /api/transcribe-chunk, then optionally translate.
@@ -535,51 +645,11 @@ export default function App() {
       }
       await appendQueue
 
-      // 3. Optional translation of the assembled transcript.
+      // 3. Optional translation of the assembled transcript (batched + throttled).
       if (action === 'translate' && finalOriginalText.trim() && !controller.signal.aborted) {
-        // Translate in word-bounded batches so a long transcript isn't truncated
-        // by the model's per-call output limit.
-        const batches = splitTextIntoBatches(finalOriginalText)
-        for (let b = 0; b < batches.length; b++) {
-          if (controller.signal.aborted) return
-          setPipeline('translate', batches.length > 1 ? `Translating ${b + 1}/${batches.length}…` : 'Translating...')
-
-          const tRes = await fetch(`${API_BASE}/api/translate-text`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: batches[b], target_lang: targetLang }),
-            signal: controller.signal,
-          })
-          if (!tRes.ok) {
-            const payload = await tRes.json().catch(() => ({}))
-            throw new Error(payload.error || `Translation failed (${tRes.status})`)
-          }
-
-          if (b > 0) { finalTranslation += ' '; setTranslation((prev) => prev + ' ') }
-
-          const reader = tRes.body.getReader()
-          const decoder = new TextDecoder()
-          let buffer = ''
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const lines = buffer.split('\n')
-            buffer = lines.pop() || ''
-            for (const line of lines) {
-              if (!line.startsWith('data: ')) continue
-              let data = null
-              try { data = JSON.parse(line.slice(6)) } catch { continue }
-              if (data.type === 'translation_chunk') {
-                finalTranslation += data.text || ''
-                setTranslation((prev) => prev + (data.text || ''))
-              } else if (data.type === 'error') {
-                throw new Error(data.message || 'Translation failed.')
-              }
-            }
-          }
-        }
+        finalTranslation = await translateInBatches(finalOriginalText, controller)
       }
+      if (controller.signal.aborted) return
 
       setPipeline('output', 'Output Generated')
       setLoading(false)
@@ -602,7 +672,7 @@ export default function App() {
         setPipelineStep('error')
       }
     }
-  }, [appendHistory, clearResults, setPipeline, sourceLang, targetLang])
+  }, [appendHistory, clearResults, setPipeline, sourceLang, translateInBatches])
 
   const runTextTranslation = useCallback(async (text) => {
     const inputText = (text || '').trim()
@@ -616,62 +686,17 @@ export default function App() {
 
     const controller = new AbortController()
     abortRef.current = controller
-    let finalTranslation = ''
 
     try {
-      const res = await fetch(`${API_BASE}/api/translate-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: inputText, target_lang: targetLang }),
-        signal: controller.signal,
-      })
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
-        throw new Error(payload.error || `Server error (${res.status})`)
-      }
+      const finalTranslation = await translateInBatches(inputText, controller)
+      if (controller.signal.aborted) return
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let finished = false
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          let data = null
-          try {
-            data = JSON.parse(line.slice(6))
-          } catch {
-            continue
-          }
-
-          if (data.type === 'translation_chunk') {
-            finalTranslation += data.text || ''
-            setTranslation((prev) => prev + (data.text || ''))
-          } else if (data.type === 'error') {
-            throw new Error(data.message || 'Translation failed.')
-          } else if (data.type === 'done') {
-            finished = true
-            setPipeline('output', 'Output Generated')
-            setLoading(false)
-            setStatus('')
-            if (inputText || finalTranslation) {
-              appendHistory(inputText, finalTranslation)
-              toast.success('Translation complete!')
-            }
-          }
-        }
-      }
-
-      if (!finished) {
-        setLoading(false)
-        setStatus('')
+      setPipeline('output', 'Output Generated')
+      setLoading(false)
+      setStatus('')
+      if (inputText || finalTranslation) {
+        appendHistory(inputText, finalTranslation)
+        toast.success('Translation complete!')
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -681,9 +706,7 @@ export default function App() {
         setPipelineStep('error')
       }
     }
-  }, [appendHistory, setPipeline, targetLang])
-
-
+  }, [appendHistory, setPipeline, translateInBatches])
 
   const handleAudioUpload = useCallback((blob, filename = 'audio.webm', blobUrl = null) => {
     deleteBlob(lastBlobUrl)
