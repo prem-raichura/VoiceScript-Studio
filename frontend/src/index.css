@@ -10,7 +10,7 @@
     -moz-osx-font-smoothing: grayscale; 
   }
   body {
-    @apply bg-slate-50 text-slate-900 font-sans min-h-screen tracking-tight;
+    @apply bg-[#EBE7F2] text-[#211B38] font-sans min-h-screen tracking-tight;
   }
 }
 
@@ -37,11 +37,12 @@
 
   /* ── Vibrant Gradient Button ── */
   .btn-brand {
-    @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-teal-500 to-cyan-600 text-white font-semibold text-sm transition-all border border-transparent shadow-card;
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full text-white font-semibold text-sm transition-all border border-transparent shadow-card;
+    background: linear-gradient(135deg, #322A52, #272140);
   }
   .btn-brand:hover {
     @apply -translate-y-[1px];
-    box-shadow: 0 0 20px rgba(20, 184, 166, 0.4);
+    box-shadow: 0 0 20px rgba(126, 111, 179, 0.5);
   }
   .btn-brand:active {
     @apply translate-y-0 shadow-card;
@@ -50,7 +51,7 @@
     @apply opacity-50 cursor-not-allowed transform-none shadow-none;
   }
   .btn-brand:focus-visible {
-    @apply outline-none ring-2 ring-offset-2 ring-teal-500;
+    @apply outline-none ring-2 ring-offset-2 ring-violet-500;
   }
 
   /* ── Muted Ghost Button ── */
@@ -92,7 +93,7 @@
     @apply block w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 font-medium transition-all cursor-pointer;
   }
   .input-select:focus {
-    @apply outline-none border-teal-400 ring-2 ring-teal-100 bg-white;
+    @apply outline-none border-violet-400 ring-2 ring-violet-100 bg-white;
   }
   .input-select:hover {
     @apply border-slate-300 bg-white;
@@ -105,7 +106,7 @@
     @apply text-slate-400 font-normal;
   }
   .input-url:focus {
-    @apply outline-none border-teal-400 ring-2 ring-teal-100 bg-white shadow-card;
+    @apply outline-none border-violet-400 ring-2 ring-violet-100 bg-white shadow-card;
   }
   .input-url:hover:not(:focus):not(:disabled) {
     @apply border-slate-300 bg-white;
@@ -162,6 +163,15 @@
   }
   .animate-float {
     animation: float 6s ease-in-out infinite;
+  }
+  .animate-wave {
+    animation: wave 1.2s ease-in-out infinite;
+    transform-origin: bottom;
+  }
+
+  @keyframes wave {
+    0%, 100% { transform: scaleY(0.4); opacity: 0.7; }
+    50% { transform: scaleY(1); opacity: 1; }
   }
 
   @keyframes fadeIn {
